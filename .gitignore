@@ -1,0 +1,17 @@
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
+.env
+ship_state.json
+chronicle.json
+deploy/oracle-cloud-init.sh
+bot.log*
+*.corrupt
+dist/
+.build-work/
+.venv-build/
+.env.*
+!.env.example
+.DS_Store
+.iconwork/

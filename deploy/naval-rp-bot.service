@@ -1,0 +1,26 @@
+[Unit]
+Description=Naval RP NPC Crew Bot (Discord, xAI brain)
+After=network-online.target
+Wants=network-online.target
+# Don't crash-loop forever if something's wrong (e.g., bad token): give up after
+# 5 restarts within 5 minutes so it doesn't hammer Discord/xAI.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/opt/naval-rp-bot
+# The bot loads .env from this directory via python-dotenv.
+ExecStart=/opt/naval-rp-bot/.venv/bin/python bot.py
+Restart=always
+RestartSec=5
+
+# Basic hardening (the bot only needs to read its dir and write its state files).
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
