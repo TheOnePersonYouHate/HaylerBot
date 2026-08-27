@@ -224,6 +224,8 @@ def test_teleports():
           is_movement_order("Bosun, report to the captain's cabin."))
     check("head-to CIC is a movement order",
           is_movement_order("Hartley, head to CIC."))
+    check("to-CIC is a movement order",
+          is_movement_order("*In CIC, over 1MC* Bosun Hartley, to CIC"))
     check("come-about is not a movement order",
           not is_movement_order("McTane, come about to course 090."))
     check("banter is not a movement order",
@@ -241,6 +243,12 @@ def test_teleports():
     check("en-route arrival may land",
           bot.allows_location_change(cs, hartley, "the captain's cabin",
                                      "anything"))
+    cs.pending.pop(hartley.key, None)
+    check("followup beat may move even without a parsed verb",
+          bot.allows_location_change(
+              cs, hartley, "CIC", "Hartley, with me.",
+              {"followup": "*reaches CIC and reports in*", "location": "CIC"},
+          ))
 
 
 def test_prompt_shape():

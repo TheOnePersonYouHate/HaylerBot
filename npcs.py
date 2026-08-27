@@ -398,6 +398,11 @@ def is_movement_order(text: str) -> bool:
     low = (text or "").lower()
     if any(c in low for c in _MOVE_ORDER_CUES):
         return True
+    # "Hartley, to CIC" / "to the bridge" -- a destination with no explicit verb.
+    if re.search(r"\bto\s+(?:the\s+)?", low) and (
+        _space_or_none(low) or re.search(r"\b(?:captain|skipper|xo|cabin)\b", low)
+    ):
+        return True
     if not re.search(_MOVE_VERB, low):
         return False
     return _space_or_none(low) is not None or bool(

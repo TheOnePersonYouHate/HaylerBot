@@ -177,7 +177,8 @@ def mark_activity(cs: ChannelState) -> None:
     cs.log_dirty = True
 
 
-def allows_location_change(cs: ChannelState, npc, proposed: str, player_text: str) -> bool:
+def allows_location_change(cs: ChannelState, npc, proposed: str, player_text: str,
+                           reply: dict = None) -> bool:
     """True if the model may move this NPC. Banter / Q&A cannot teleport them."""
     if not (proposed or "").strip():
         return False
@@ -185,6 +186,10 @@ def allows_location_change(cs: ChannelState, npc, proposed: str, player_text: st
         return True
     pending = (cs.pending.get(npc.key) or "").lower()
     if pending.startswith("en route"):
+        return True
+    # Register 1b: acknowledge + follow-up arrival means they are moving, even if
+    # the order was terse ("Hartley, to CIC") and we didn't parse a move verb.
+    if reply and reply.get("followup"):
         return True
     return is_movement_order(player_text)
 
@@ -435,7 +440,7 @@ async def _post_reply(cs: ChannelState, channel, npc, reply: dict,
         return None  # couldn't post at all -> don't mutate ship state for an unseen reply
     apply_update(cs, reply.get("state_update") or {}, speaker_rank)
     proposed = (reply.get("location") or "").strip()
-    if proposed and allows_location_change(cs, npc, proposed, player_text):
+    if proposed and allows_location_change(cs, npc, proposed, player_text, reply):
         set_location(cs, npc.key, proposed)
     elif proposed:
         log.info("ignored location jump for %s -> %r", npc.display_name, proposed)
