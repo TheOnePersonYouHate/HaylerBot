@@ -23,11 +23,12 @@ import brain
 import config
 from brain import npc_respond
 from npcs import (
-    CREW, SHIP, authority_note, comms_channel, find_addressed_split, find_called,
-    find_hailed_spaces, is_group_address, npc_by_display_name,
-    player_location_from_text, rank_from_roles, rank_index, resolve_player, space_of,
+    CREW, SHIP, authority_note, can_order_ship, can_reach, comms_channel,
+    find_addressed_split, find_called, find_hailed_spaces, is_group_address,
+    is_movement_order, npc_by_display_name, player_location_from_text,
+    rank_from_roles, rank_index, resolve_player, space_of,
 )
-from ship import ShipState, load_states, load_texts, save_states, save_texts
+from ship import ShipState, load_maps, load_states, load_texts, save_maps, save_states, save_texts
 
 log = logging.getLogger("naval_bot")
 
@@ -36,7 +37,7 @@ intents.message_content = True  # privileged: enable in the Developer Portal
 
 ENGAGE_WINDOW = config.CONTINUITY_SECONDS  # seconds before the crew disengage
 # (wait longer than this without addressing anyone to talk out-of-context freely)
-HISTORY_LIMIT = 120  # how many recent messages per channel the crew "remember"
+HISTORY_LIMIT = 60  # how many recent messages per channel the crew "remember"
 FOLLOWUP_DELAY = 15  # seconds before an NPC posts its follow-up beat (arriving, reporting, etc.)
 LOCAL_CONTEXT = 24000  # context length the auto-loader requests from LM Studio
 MAX_CREW_CHAIN = 3  # cap on crew-to-crew (NPC->NPC) replies per player turn -> can't loop
@@ -81,15 +82,38 @@ def is_narration(text: str) -> bool:
     return "*" in text and not re.search(r"[A-Za-z0-9]", outside)
 
 
+# Releases a held pending action ("Enter" after a knock, "as you were", etc.).
+_RELEASE = re.compile(
+    r"(?:^|[.,!?:]\s*)(?:enter|come in|come on in|as you were|carry on|belay(?: that)?|"
+    r"never mind|stand down|dismissed|that will be all)\b",
+    re.I,
+)
+
+
+def is_release(text: str) -> bool:
+    """True when the speaker ends a held wait (admit someone, belay, dismiss)."""
+    if not text:
+        return False
+    spoken = re.sub(r"\*[^*]*\*", " ", text)
+    return bool(_RELEASE.search(spoken.strip()))
+
+
 _ship_states = load_states(config.STATE_FILE)  # {channel_id: ShipState}
 _logs = load_texts(config.LOG_FILE)            # {channel_id: persistent ship's-log summary}
+_pending = load_maps(config.PENDING_FILE)      # {channel_id: {npc.key: pending action}}
+_locations = load_maps(config.LOCATIONS_FILE)  # {channel_id: {npc.key: current location}}
 
 
 class CrewBot(commands.Bot):
     async def setup_hook(self):
-        # Commands are synced per-guild in on_ready / on_guild_join so they
-        # appear in every server the bot is in.
-        pass
+        self.loop.create_task(_idle_recap_loop())
+
+    async def close(self):
+        try:
+            await recap_all_dirty()
+        except Exception:
+            log.exception("shutdown recap failed")
+        await super().close()
 
 
 bot = CrewBot(command_prefix="!", intents=intents, help_command=None)
@@ -106,7 +130,10 @@ class ChannelState:
     player_space: dict = field(default_factory=dict)  # author_id -> canonical space they're in
     webhook: object = None
     active: dict = field(default_factory=dict)  # author_id -> (npc, expires_at): each speaker's own thread
+    pending: dict = field(default_factory=dict)  # npc.key -> unresolved action (knocking, waiting, en route)
     summary: str = ""        # persistent ship's log carried over from earlier sessions
+    last_activity: float = 0.0
+    log_dirty: bool = False
 
     def location_of(self, npc) -> str:
         return self.locations.get(npc.key) or npc.station or "their usual station"
@@ -120,8 +147,56 @@ def channel_state(channel_id: int) -> ChannelState:
     if cs is None:
         cs = ChannelState(channel_id=channel_id, ship=_ship_states.get(channel_id) or ShipState(name=SHIP["display"]))
         cs.summary = _logs.get(channel_id, "")
+        cs.pending = dict(_pending.get(channel_id) or {})
+        cs.locations = dict(_locations.get(channel_id) or {})
         _channels[channel_id] = cs
     return cs
+
+
+def _save_channel_map(store: dict, cs: ChannelState, data: dict, path: str) -> None:
+    if data:
+        store[cs.channel_id] = dict(data)
+    else:
+        store.pop(cs.channel_id, None)
+    save_maps(store, path)
+
+
+def set_pending(cs: ChannelState, npc_key: str, value: str) -> None:
+    """Record or clear a per-NPC held action and persist it for this channel."""
+    value = (value or "").strip()
+    if value:
+        cs.pending[npc_key] = value
+    else:
+        cs.pending.pop(npc_key, None)
+    _save_channel_map(_pending, cs, cs.pending, config.PENDING_FILE)
+
+
+def mark_activity(cs: ChannelState) -> None:
+    """A turn happened -- reset the idle timer and mark the chronicle dirty."""
+    cs.last_activity = time.monotonic()
+    cs.log_dirty = True
+
+
+def allows_location_change(cs: ChannelState, npc, proposed: str, player_text: str) -> bool:
+    """True if the model may move this NPC. Banter / Q&A cannot teleport them."""
+    if not (proposed or "").strip():
+        return False
+    if space_of(proposed) == space_of(cs.location_of(npc)):
+        return True
+    pending = (cs.pending.get(npc.key) or "").lower()
+    if pending.startswith("en route"):
+        return True
+    return is_movement_order(player_text)
+
+
+def set_location(cs: ChannelState, npc_key: str, value: str) -> None:
+    """Move an NPC and persist the new location so a restart doesn't snap them back."""
+    value = (value or "").strip()
+    if value:
+        cs.locations[npc_key] = value
+    else:
+        cs.locations.pop(npc_key, None)
+    _save_channel_map(_locations, cs, cs.locations, config.LOCATIONS_FILE)
 
 
 async def get_webhook(cs: ChannelState, channel, refresh: bool = False) -> discord.Webhook:
@@ -149,6 +224,7 @@ async def speak(cs: ChannelState, channel, npc, text: str) -> bool:
             webhook = await get_webhook(cs, channel, refresh=(attempt == 2))
             await webhook.send(content=text, **kwargs)
             cs.history.append(f"{npc.display_name}: {text}")
+            mark_activity(cs)
             return True
         except discord.NotFound:
             cs.webhook = None  # webhook was deleted -> rebuild on the next attempt
@@ -157,6 +233,7 @@ async def speak(cs: ChannelState, channel, npc, text: str) -> bool:
     try:
         await channel.send(f"**{npc.display_name}:** {text}")
         cs.history.append(f"{npc.display_name}: {text}")
+        mark_activity(cs)
         return True
     except discord.HTTPException:
         log.warning("Could not post reply for %s in channel %s",
@@ -164,7 +241,17 @@ async def speak(cs: ChannelState, channel, npc, text: str) -> bool:
         return False
 
 
-def apply_update(cs: ChannelState, update: dict) -> None:
+def apply_update(cs: ChannelState, update: dict, speaker_rank: str = "") -> None:
+    """Apply a model-proposed ship-state change. Helm / GQ / alert require an officer."""
+    if not update:
+        return
+    update = dict(update)
+    if not can_order_ship(speaker_rank):
+        blocked = [k for k in ("heading", "speed", "alert") if update.get(k) not in (None, "")]
+        for k in blocked:
+            update.pop(k, None)
+        if blocked:
+            log.info("refused ship-control update %s from rank %r", blocked, speaker_rank or "(unknown)")
     ship = cs.ship
     changed = False
     if update.get("heading") is not None:
@@ -321,32 +408,62 @@ async def resolve_reply_target(message: discord.Message):
 
 async def deliver_followup(cs: ChannelState, channel, npc, text: str) -> None:
     await asyncio.sleep(FOLLOWUP_DELAY)
-    await speak(cs, channel, npc, text)
+    if await speak(cs, channel, npc, text):
+        # The arrival beat is now the held action until someone releases it.
+        set_pending(cs, npc.key, text)
 
 
-async def _post_reply(cs: ChannelState, channel, npc, reply: dict):
+def _apply_pending(cs: ChannelState, npc, reply: dict, player_text: str = "") -> None:
+    """Keep, replace, or clear the NPC's held action from this reply."""
+    pending = reply.get("pending")
+    if pending is not None:
+        set_pending(cs, npc.key, pending)
+        return
+    if reply.get("followup"):
+        dest = reply.get("location") or cs.location_of(npc)
+        set_pending(cs, npc.key, f"en route to {dest}")
+        return
+    if is_release(player_text):
+        set_pending(cs, npc.key, "")
+
+
+async def _post_reply(cs: ChannelState, channel, npc, reply: dict,
+                      speaker_rank: str = "", player_text: str = ""):
     """Post one NPC line, apply ship/location changes, schedule any follow-up. Returns
     the spoken line (for crew-to-crew scanning) or None if nothing could be posted."""
     if not await speak(cs, channel, npc, reply["say"]):
         return None  # couldn't post at all -> don't mutate ship state for an unseen reply
-    apply_update(cs, reply["state_update"])
-    if reply["location"]:
-        cs.locations[npc.key] = reply["location"]
-    if reply["followup"]:
+    apply_update(cs, reply.get("state_update") or {}, speaker_rank)
+    proposed = (reply.get("location") or "").strip()
+    if proposed and allows_location_change(cs, npc, proposed, player_text):
+        set_location(cs, npc.key, proposed)
+    elif proposed:
+        log.info("ignored location jump for %s -> %r", npc.display_name, proposed)
+    _apply_pending(cs, npc, reply, player_text)
+    if reply.get("followup"):
         asyncio.create_task(deliver_followup(cs, channel, npc, reply["followup"]))
     return reply["say"]
+
+
+def _crew_hears(cs: ChannelState, caller, callee, text: str) -> bool:
+    """Same earshot/circuit rule players get -- a shout in CIC does not reach the main deck."""
+    return can_reach(cs.location_of(caller), cs.location_of(callee), text)
 
 
 async def _run_crew_chain(cs: ChannelState, channel, calls, spoken: set, ship_summary: str) -> None:
     """Let the crew answer each other: when a posted line HAILS another crew member
     ("Bosun! Get in here!"), that crew member replies too, and may move to the caller.
-    Bounded by MAX_CREW_CHAIN and a 'spoken' set (each crew answers at most once per
-    turn), so an A->B->A ping-pong can never loop."""
+    Earshot and circuits apply the same as player speech. Bounded by MAX_CREW_CHAIN
+    and a 'spoken' set (each crew answers at most once per turn)."""
     queue = deque(calls)  # (called_npc, caller_npc, caller_text)
     hops = 0
     while queue and hops < MAX_CREW_CHAIN:
         called_npc, caller, caller_text = queue.popleft()
         if called_npc.key in spoken:
+            continue
+        if not _crew_hears(cs, caller, called_npc, caller_text):
+            log.info("  crew-chain: %s cannot hear %s (earshot)",
+                     called_npc.display_name, caller.display_name)
             continue
         spoken.add(called_npc.key)
         hops += 1
@@ -356,15 +473,17 @@ async def _run_crew_chain(cs: ChannelState, channel, calls, spoken: set, ship_su
                     called_npc, caller_text, ship_summary, "\n".join(cs.history),
                     speaker=caller.display_name, location=cs.location_of(called_npc),
                     log=cs.summary, speaker_authority=authority_note(caller.rank),
+                    pending=cs.pending.get(called_npc.key, ""),
                 )
         except Exception:
             log.exception("crew-chain reply failed for %s", called_npc.display_name)
             continue
-        posted = await _post_reply(cs, channel, called_npc, reply)
+        posted = await _post_reply(cs, channel, called_npc, reply, speaker_rank=caller.rank,
+                                   player_text=caller_text)
         if posted is None or is_signoff(posted):
             continue  # nothing posted, or this crew member signed off -> stop the chain here
         for nxt in find_called(posted):  # this crew member may hail yet another
-            if nxt.key != called_npc.key and nxt.key not in spoken:
+            if nxt.key != called_npc.key and nxt.key not in spoken and _crew_hears(cs, called_npc, nxt, posted):
                 queue.append((nxt, called_npc, posted))
 
 
@@ -408,6 +527,7 @@ async def on_message(message: discord.Message):
     cs.seen_players[message.author.id] = (message.author.display_name, speaker)
     label = speaker if speaker != "the officer on deck" else message.author.display_name
     cs.history.append(f"{label}: {message.content}")
+    mark_activity(cs)
 
     if is_signoff(message.content):
         cs.active.pop(message.author.id, None)  # "out"/hang-up ends the exchange
@@ -431,7 +551,8 @@ async def on_message(message: discord.Message):
             *(
                 npc_respond(npc, message.content, ship_summary, history,
                             speaker, cs.location_of(npc), cs.summary,
-                            speaker_authority=speaker_authority)
+                            speaker_authority=speaker_authority,
+                            pending=cs.pending.get(npc.key, ""))
                 for npc in npcs
             ),
             return_exceptions=True,
@@ -439,6 +560,7 @@ async def on_message(message: discord.Message):
 
     spoken = {n.key for n in npcs}   # crew who've already answered this turn
     calls = []                       # (called_npc, caller_npc, caller_text) for the crew chain
+    speaker_rank = _speaker_rank(message.author)
     for npc, reply in zip(npcs, replies):
         if isinstance(reply, Exception):  # LM Studio down, model not loaded, etc.
             log.warning("Backend error generating reply for %s: %r", npc.display_name, reply)
@@ -447,13 +569,16 @@ async def on_message(message: discord.Message):
             )
             continue
         try:
-            posted = await _post_reply(cs, message.channel, npc, reply)
+            posted = await _post_reply(
+                cs, message.channel, npc, reply,
+                speaker_rank=speaker_rank, player_text=message.content,
+            )
             if posted is None:
                 continue
             if is_signoff(posted):
                 continue  # this crew member signed off -> don't spawn more replies
             for c in find_called(posted):  # did this line hail another crew member?
-                if c.key != npc.key and c.key not in spoken:
+                if c.key != npc.key and c.key not in spoken and _crew_hears(cs, npc, c, posted):
                     calls.append((c, npc, posted))
         except Exception:  # one NPC's failure must not abort the rest of the turn
             log.exception("Failed handling reply for %s", npc.display_name)
@@ -466,6 +591,9 @@ async def on_message(message: discord.Message):
 async def status(interaction: discord.Interaction):
     cs = channel_state(interaction.channel_id)
     info = f"{cs.ship.summary()}\nLLM backend (last used): {brain.LAST_BACKEND}"
+    held = [f"{n.display_name}: {cs.pending[n.key]}" for n in CREW if n.key in cs.pending]
+    if held:
+        info += "\nPending:\n  " + "\n  ".join(held)
     await interaction.response.send_message(f"```\n{info}\n```", ephemeral=True)
 
 
@@ -522,6 +650,50 @@ async def roster(interaction: discord.Interaction):
     await interaction.followup.send(f"**Ship's roster**\n{body}", ephemeral=True)
 
 
+async def recap_channel(cs: ChannelState) -> bool:
+    """Write this channel's chronicle if there is something new. Returns True if saved."""
+    if not cs.history or not cs.log_dirty:
+        return False
+    cs.summary = await brain.summarize("\n".join(cs.history), cs.summary)
+    _logs[cs.channel_id] = cs.summary
+    save_texts(_logs, config.LOG_FILE)
+    cs.log_dirty = False
+    return True
+
+
+async def recap_dirty_idle() -> None:
+    now = time.monotonic()
+    idle_after = config.RECAP_IDLE_SECONDS
+    for cs in list(_channels.values()):
+        if not cs.log_dirty or not cs.last_activity:
+            continue
+        if now - cs.last_activity < idle_after:
+            continue
+        try:
+            if await recap_channel(cs):
+                log.info("auto-recap channel %s after idle", cs.channel_id)
+        except Exception:
+            log.exception("auto-recap failed for channel %s", cs.channel_id)
+
+
+async def recap_all_dirty() -> None:
+    for cs in list(_channels.values()):
+        if not cs.log_dirty or not cs.history:
+            continue
+        try:
+            if await recap_channel(cs):
+                log.info("shutdown recap channel %s", cs.channel_id)
+        except Exception:
+            log.exception("shutdown recap failed for channel %s", cs.channel_id)
+
+
+async def _idle_recap_loop() -> None:
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        await asyncio.sleep(60)
+        await recap_dirty_idle()
+
+
 @bot.tree.command(name="recap", description="Summarize this session into the ship's log for next time")
 async def recap(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -529,9 +701,8 @@ async def recap(interaction: discord.Interaction):
     if not cs.history:
         await interaction.followup.send("Nothing has happened to log yet.", ephemeral=True)
         return
-    cs.summary = await brain.summarize("\n".join(cs.history), cs.summary)
-    _logs[cs.channel_id] = cs.summary
-    save_texts(_logs, config.LOG_FILE)
+    cs.log_dirty = True
+    await recap_channel(cs)
     await interaction.followup.send(f"**Ship's log updated:**\n{cs.summary}", ephemeral=True)
 
 

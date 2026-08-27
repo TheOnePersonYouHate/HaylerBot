@@ -24,6 +24,7 @@ class NPC:
     display: str = ""             # optional chat-name override, e.g. "Lieutenant Hoover"
     aliases: list = field(default_factory=list)
     personality: str = ""
+    kit: str = ""                 # specialist script; injected only on matching orders
     avatar_url: str = None
     station: str = ""             # default duty location, e.g. "the engine room"
     location: str = ""            # current location (starts at station, moves in play)
@@ -79,6 +80,7 @@ def load_crew(path: str):
                 station=entry.get("station", ""),
                 aliases=[a.lower() for a in entry.get("aliases", [])],
                 personality=entry.get("personality", ""),
+                kit=(entry.get("kit") or "").strip(),
                 avatar_url=entry.get("avatar_url") or None,
             )
         )
@@ -100,6 +102,7 @@ def load_ship(path: str) -> dict:
         "hull": hull,
         "class": s.get("class") or "warship",
         "knowledge": s.get("knowledge") or "",
+        "swo": s.get("swo") or "",
         "display": f"{name} ({hull})" if hull else name,
     }
 
@@ -245,6 +248,11 @@ def authority_note(rank_name: str) -> str:
     )
 
 
+def can_order_ship(rank_name: str) -> bool:
+    """True if this rank may change course, speed, or alert (warrant/officer+)."""
+    return rank_index(rank_name) >= _OFFICER_MIN_IDX
+
+
 # --- Spatial awareness: fold free-form locations into canonical "earshot" spaces ---
 # Two people can hear each other only if they share a space. Bridge wings collapse
 # into "bridge" (they open onto it); an unrecognized location becomes its own
@@ -374,6 +382,40 @@ def player_location_from_text(text: str):
     return None
 
 
+# Orders that send a crew member somewhere (not helm/course changes).
+_MOVE_ORDER_CUES = (
+    "report to", "report in", "lay up to", "lay to the", "lay to",
+    "get up here", "get in here", "get down here", "get over here",
+    "come here", "come up here", "come down here",
+    "on the double", "front and center",
+    "get to the", "up to the bridge",
+    "find the", "go check", "go see",
+)
+
+
+def is_movement_order(text: str) -> bool:
+    """True if the speaker is sending someone somewhere (not 'come about to 090')."""
+    low = (text or "").lower()
+    if any(c in low for c in _MOVE_ORDER_CUES):
+        return True
+    if not re.search(_MOVE_VERB, low):
+        return False
+    return _space_or_none(low) is not None or bool(
+        re.search(r"\b(?:captain|skipper|xo|cabin)\b", low)
+    )
+
+
+# Watchstanders who brief contacts / conn the ship get the SWO encyclopedia.
+_SWO_KEYS = {"navigator", "mctane", "lookout", "hoover"}
+
+
+def swo_for(npc) -> str:
+    """SWO threat/weapons brick, or '' if this billet does not need it every call."""
+    if getattr(npc, "key", None) in _SWO_KEYS:
+        return SHIP.get("swo") or ""
+    return ""
+
+
 # Ship's communication circuits. Intra-ship talk rides these; a hail reaches another
 # space ONLY over one of them (otherwise you're limited to earshot). The 1MC reaches
 # the WHOLE ship; other circuits reach the station/person you raise.
@@ -406,6 +448,49 @@ def comms_channel(text: str):
     if _1MC_RE.search(low):
         return "1mc"
     return None
+
+
+# Orders that should attach an NPC's `kit` (Hartley's 1MC phrase book). Kept
+# specific so "Bosun, how's the deck?" does not load the whole POD.
+_ANNOUNCE_CUES = (
+    "now hear this", "pass the word", "pass a word", "passing the word",
+    "general announcing", "over the 1mc", "on the 1mc", "pipe the",
+    "sound general quarters", "general quarters", "battle stations",
+    "man overboard",
+    "getting underway", "get underway", "special sea and anchor",
+    "special sea detail", "single up", "let go all lines", "shift colors",
+    "coming into port", "come into port", "make all preparations",
+    "unrep", "refuel", "refueling",
+    "sea rescue", "helo detail",
+    "reveille", "sweepers", "mess call",
+    "quarters for muster", "all hands to quarters",
+    "attention to colors", "make colors",
+    "turn to", "knock off ship's work", "liberty call",
+    "taps", "lights out", "alarm test", "whistle test",
+    "arriving", "departing",
+)
+
+
+def is_announcement_order(text: str) -> bool:
+    """True if the line is a pass-the-word / 1MC / evolution call, not ordinary chatter."""
+    if comms_channel(text) == "1mc":
+        return True
+    low = (text or "").lower()
+    return any(c in low for c in _ANNOUNCE_CUES)
+
+
+def kit_for(npc, text: str) -> str:
+    """NPC specialist script if this order is the job the kit is for, else ''."""
+    if not getattr(npc, "kit", ""):
+        return ""
+    return npc.kit if is_announcement_order(text) else ""
+
+
+def can_reach(caller_location: str, callee_location: str, text: str) -> bool:
+    """True if callee can hear caller: same earshot space, or the line rides a circuit."""
+    if comms_channel(text) is not None or find_hailed_spaces(text):
+        return True
+    return space_of(caller_location) == space_of(callee_location)
 
 
 def _classify_addressed(text: str):

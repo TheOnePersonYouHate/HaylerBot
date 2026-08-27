@@ -58,6 +58,10 @@ STRICT_CHANNEL_IDS = {
 # re-naming every line); the relevance gate + OOC markers still filter stray chatter.
 CONTINUITY_SECONDS = int(os.getenv("CONTINUITY_SECONDS", "60"))
 
+# Idle seconds before an unsaved scene is auto-written to the ship's log.
+# /recap still works any time. Shutdown also flushes a dirty log.
+RECAP_IDLE_SECONDS = int(os.getenv("RECAP_IDLE_SECONDS", "600"))
+
 # Optional. Slash commands now sync to every server the bot is in, so this is
 # unused -- kept only for backward compatibility with older .env files.
 GUILD_ID = int(os.getenv("GUILD_ID") or 0)
@@ -87,3 +91,5 @@ CHARACTERS_FILE = _under_base(os.getenv("CHARACTERS_FILE", "characters.yaml"))
 # --- Persistence ---
 STATE_FILE = _under_base(os.getenv("STATE_FILE", "ship_state.json"))
 LOG_FILE = _under_base(os.getenv("LOG_FILE", "chronicle.json"))
+PENDING_FILE = _under_base(os.getenv("PENDING_FILE", "pending.json"))
+LOCATIONS_FILE = _under_base(os.getenv("LOCATIONS_FILE", "locations.json"))

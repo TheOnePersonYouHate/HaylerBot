@@ -64,30 +64,25 @@ Do **not** add more crew or more Wikipedia until state/spatial/authority are rea
 
 ## 4. Issues to iron out (priority)
 
-### P0 — breaks scenes
+### Done (2026-08-26)
 
-**1. Actions don’t stick (pending-action).**
-Bosun knocks and waits → next line he’s back on the main deck. We store speech + a location string. We do **not** store “waiting at the CO’s door until someone says enter.” The prompt fights itself: “hold the beat” vs “vary your language / advance the moment.” `FOLLOWUP_DELAY = 15` fires whether the beat is ready or not.
+**1. Actions stick (pending-action).** Per-NPC `pending` on `ChannelState`, persisted in `pending.json`. Injected every `npc_respond`. Arrival follow-up becomes the held beat; “Enter” / “as you were” / “belay” / explicit `pending: ""` clears it. Prompt no longer says “advance the moment” while a wait is held. `/status` lists held actions.
 
-Fix: persist per-NPC `pending` on `ChannelState` (e.g. `waiting at captain's cabin, knocked, not admitted`). Inject it every `npc_respond`. Clear on “enter” / new order. Suppress “advance the moment” while set. Don’t treat a 15s timer as “arrived.”
+**2. Crew-to-crew uses earshot.** `_run_crew_chain` and the hail collector run through `can_reach` (same space, or a circuit / station hail). A face-to-face “Bosun! Get in here!” from CIC no longer pulls Hartley off the main deck.
 
-**2. Crew-to-crew ignores earshot.**
-Players can’t yell from engineering to McTane. But if Hoover says “Bosun! Get in here!”, `_run_crew_chain` uses `find_called` with **no** space/circuit check — Hartley answers from the main deck. Same hole for NPC 1MC vs face-to-face.
+**3. Authority is enforced in code.** `apply_update` strips heading/speed/alert unless `can_order_ship` (warrant+). Notes still apply for anyone. Prompt refusal remains as the in-character response.
 
-Fix: run crew-chain targets through the same earshot + `comms_channel` rules as players.
+**4. Alias landmines removed.** Dropped Doyle `chief`, Pike `watch`, Flasterstein `gunner`. `Chief McTane` / personal names still work.
 
-**3. Authority is honor-system.**
-`apply_update` never checks rank. A Seaman can set GQ or change course if the model plays along. Location is the same: omit `location` → they never moved; hallucinate it → they teleport.
+Offline regress: `python tests/test_scene_state.py`.
 
-Fix: refuse helm/GQ/weapons in code unless `rank_index` is officer+. Optionally ignore `location` jumps that skip a movement beat.
+### Still open
 
-### P1 — keeps biting in play
+Location teleports are blocked unless the line is a movement order, the NPC is already `en route`, or the new place is the same space.
 
-**4. Alias landmines** in `characters.yaml`:
-- Doyle: `chief` (steals McTane / any “Chief, …”)
-- Pike: `watch`
-- Flasterstein: `gunner`
-Vocative rules help; they aren’t airtight. Drop the generic words; keep personal names.
+Prompt slimmed: history 60; SWO encyclopedia is `ship.swo` for nav/helm/lookout/Hoover only; Navy lecture tail (history/awards/designators/uniforms) cut; Hartley 1MC kit injects only on announcement orders.
+
+Auto-recap after `RECAP_IDLE_SECONDS` (default 10 min) idle, and on clean shutdown. `/recap` still works.
 
 **5. Prompt is too fat.**
 Every call gets SWO spec + `NAVY_REFERENCE` + 120-line history. Credits aren’t the issue; **attention** is. Last two lines of the scene get buried → loops, wrong contacts, “Commodoree.”
@@ -108,16 +103,10 @@ Fix: shared Navy block first (prefix-cache on local); 1MC repertoire only on Har
 
 ## 5. Suggested next pass (when you sit down)
 
-One PR-sized chunk, in this order:
-
-1. Pending-action field + prompt tweak (kill “advance the moment” while pending).
-2. Earshot/circuits on `_run_crew_chain`.
-3. Hard reject in `apply_update` for sub-officer helm/GQ/weapons.
-4. Alias cleanup (`chief` / `watch` / `gunner`).
-
-Then shrink the prompt. Then auto-recap. Then avatars/soundboard.
-
-Keep the existing offline regress (`_regress.py` from the Windows session, or recreate from the 31 checks). Add cases for: pending hold, crew-chain blocked across spaces, Seaman cannot `state_update.alert = general quarters`.
+1. Shrink the prompt (shared Navy block first; 1MC only on Hartley; history ~60).
+2. Auto-recap on idle/shutdown.
+3. Optionally refuse hallucinated `location` jumps that skip a movement beat.
+4. Avatars / soundboard.
 
 ---
 

@@ -96,3 +96,21 @@ def load_texts(path: str) -> dict:
 def save_texts(texts: dict, path: str) -> None:
     raw = {str(cid): text for cid, text in texts.items()}
     _atomic_write(path, json.dumps(raw, indent=2))
+
+
+def load_maps(path: str) -> dict:
+    """Load {channel_id: {key: text}} -- used for per-NPC pending actions."""
+    raw = _load_json(path)
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k, v in raw.items():
+        if not str(k).lstrip("-").isdigit() or not isinstance(v, dict):
+            continue
+        out[int(k)] = {str(nk): str(nv) for nk, nv in v.items() if str(nv).strip()}
+    return out
+
+
+def save_maps(maps: dict, path: str) -> None:
+    raw = {str(cid): dict(m) for cid, m in maps.items() if m}
+    _atomic_write(path, json.dumps(raw, indent=2))

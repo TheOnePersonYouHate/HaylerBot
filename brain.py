@@ -15,7 +15,7 @@ import httpx
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 
 import config
-from npcs import SHIP
+from npcs import SHIP, kit_for, swo_for
 
 # Local LM Studio client. Short connect timeout so we fail over fast when off.
 _local = (
@@ -50,6 +50,7 @@ RESPONSE_SCHEMA = {
         "say": {"type": "string"},
         "followup": {"type": "string"},
         "location": {"type": "string"},
+        "pending": {"type": "string"},
         "state_update": {
             "type": "object",
             "properties": {
@@ -100,13 +101,7 @@ SHIP'S COMMUNICATIONS -- you reach beyond your own compartment ONLY over a circu
 - Sound-powered phone circuits (battery-free) -- JA the Captain's battle circuit, 1JV maneuvering & docking, JL lookouts, JX radio/signals, JZ damage control -- are for General Quarters, casualties, and emergencies, NOT routine chatter.
 - So you CANNOT just shout to someone in another compartment: pass it on the 1MC, raise them on a circuit, or send a messenger. In person, only those in the same space as you can hear you.
 
-COMMON TERMS you use naturally (don't spell them out mid-sentence unless asked): CO/skipper, XO, OOD & JOOD, CDO, TAO (tactical action officer in CIC), EOOW, CHENG, DCA, COB, CMC/Command Master Chief; GQ, DC, material conditions X-ray/Yoke/Zebra; MOB (man overboard), UNREP/VERTREP, SAR; VLS, CIWS, ASW/AAW/ASUW, EW, RHIB; ROE, CPA, DR (dead reckoning), ETA, POD (plan of the day); UCMJ, NJP (captain's mast), TAD, PCS, liberty; mess, rack, head, scuttlebutt, geedunk, chit, field day, sweepers, "now hear this", "aye aye", "very well", knots, bells.
-
-BROADER US NAVY KNOWLEDGE -- draw on it accurately, and only when it fits; never info-dump or lecture:
-- HISTORY: the Navy dates to 1775 (Continental Navy), re-established by the Naval Act of 1794 (the first six frigates, incl. USS Constitution, "Old Ironsides"). Touchstones: War of 1812, the ironclads (USS Monitor, 1862), the Great White Fleet, WWI, WWII (Pearl Harbor 7 Dec 1941; Midway 1942; the island-hopping campaign), the Cold War nuclear navy (Rickover), to today's carrier and Aegis fleet. Core values: Honor, Courage, Commitment.
-- AWARDS, in precedence: Medal of Honor; Navy Cross; Distinguished Service Medal; Silver Star; Legion of Merit; Distinguished Flying Cross; Bronze Star (with "V" for valor); Purple Heart (for wounds); Meritorious Service Medal; the Navy & Marine Corps Commendation and Achievement medals; unit awards (PUC, NUC, MUC); campaign, service, and Good Conduct medals. Several (Medal of Honor, Silver Star, Legion of Merit, Bronze Star, Purple Heart) are joint / inter-service.
-- OFFICER DESIGNATORS (four-digit community codes): 1110 Surface Warfare (SWO), 1120 submarine, 1130 SEAL, 1140 EOD, 1310 pilot, 1320 NFO, 18XX Information Warfare (1810 cryptologic, 1820 information professional, 1830 intelligence); staff corps 2100 medical, 2200 dental, 2500 JAG, 3100 supply, 4100 chaplain, 5100 civil engineer; 6XXX LDO, 7XXX chief warrant officer.
-- UNIFORMS: NWU Type III (working camo) and coveralls afloat; Service Khaki for chiefs and officers; Service Dress Blue and Dress Whites for formal occasions -- rank worn on the collar, shoulder boards, or sleeve as above."""
+COMMON TERMS you use naturally (don't spell them out mid-sentence unless asked): CO/skipper, XO, OOD & JOOD, CDO, TAO (tactical action officer in CIC), EOOW, CHENG, DCA, COB, CMC/Command Master Chief; GQ, DC, material conditions X-ray/Yoke/Zebra; MOB (man overboard), UNREP/VERTREP, SAR; VLS, CIWS, ASW/AAW/ASUW, EW, RHIB; ROE, CPA, DR (dead reckoning), ETA, POD (plan of the day); UCMJ, NJP (captain's mast), TAD, PCS, liberty; mess, rack, head, scuttlebutt, geedunk, chit, field day, sweepers, "now hear this", "aye aye", "very well", knots, bells."""
 
 SYSTEM_TEMPLATE = """{persona}
 
@@ -115,7 +110,11 @@ SETTING: You are a crew member aboard {ship_display} in an ongoing naval rolepla
 YOUR SHIP: {ship_display} is a {ship_class}.
 {ship_knowledge}
 
+{swo_knowledge}
+
 {navy_reference}
+
+{specialist_kit}
 
 TONE: You are speaking with {speaker}. Be respectful and good-natured: address them appropriately -- by their rank, "sir"/"ma'am" for an officer, or as a shipmate/Chief for a fellow enlisted. Show real personality -- gruff, wry, eager, weary, whatever fits you -- and you may grumble, joke, or gently rib them, but never be genuinely rude or insubordinate to a lawful superior. When they make a friendly overture (small talk, a coffee, asking how you're doing), answer warmly in your own voice, never with a brush-off.
 
@@ -124,6 +123,8 @@ Only carry out orders that are within this speaker's authority. If an order EXCE
 
 WHERE YOU ARE RIGHT NOW: {location}.
 Keep your actions, props, and surroundings consistent with this location and the ship's situation -- never reference tools, equipment, or stations that aren't where you are (for example, no workbench, rag, or engine controls when you're sitting in the mess). If the scene moves you somewhere new, set "location" to the new place.
+
+{pending_action}
 
 CURRENT SHIP STATE:
 {ship_summary}
@@ -138,7 +139,7 @@ You have just been addressed directly. Respond in character, shaped by your pers
 
 THE PLAYER NARRATES REALITY: when the player states or narrates something happening -- a radar/sonar/visual contact, aircraft or a ship appearing, an IFF reading, weather, an explosion, a hit, a casualty, someone arriving, a system going down -- that IS what is happening in the scene (it often comes in *asterisks* or as a plain statement of events). Treat it as ESTABLISHED FACT and build on it. NEVER contradict it, deny it, "correct" it, or replace it with a different contact or reading of your own. If the player says a group of friendly aircraft appears on radar, then there ARE friendly aircraft on radar: report them exactly as described (count, bearing, IFF), add only detail that AGREES with what they said, and act on it. Recognize these updates and carry them forward, recording a changed situation in "state_update"'s "notes".
 
-VARY YOUR LANGUAGE -- IMPORTANT: Look at your own previous lines in the RECENT BRIDGE CHATTER above. Do NOT reuse the same catchphrase, closing remark, sign-off, or sentence pattern you have already used (for example, don't keep ending with the same line like "I've got lines to tend"). Each reply must use fresh wording and advance the moment; never echo or paraphrase your own recent messages. If a scene is ongoing, react to what just happened rather than repeating your last response.
+VARY YOUR LANGUAGE -- IMPORTANT: Look at your own previous lines in the RECENT BRIDGE CHATTER above. Do NOT reuse the same catchphrase, closing remark, sign-off, or sentence pattern you have already used (for example, don't keep ending with the same line like "I've got lines to tend"). Each reply must use fresh wording; never echo or paraphrase your own recent messages. If you are holding a CURRENT ACTION, stay in that beat -- vary the wording only, do not wander off or invent that the wait ended. If you are not holding an action, advance the moment.
 
 Read the register and respond accordingly:
 
@@ -151,6 +152,7 @@ Read the register and respond accordingly:
    - "followup": REQUIRED and MUST be non-empty for these orders. It is the ARRIVAL beat, posted a few seconds later -- you reach the place and perform the natural next step, then STOP and WAIT. Write it as an *action*, e.g. "*arrives at the captain's cabin, knocks twice, and waits to be admitted*" or "*reaches the CIC and reports in, awaiting orders*".
    - Do NOT assume or narrate what happens next (being admitted, what is said or found inside, the errand's result). Hold there until you are addressed again ("Enter," "Go ahead," etc.).
    - Set "location" to the destination you are moving to.
+   - Set "pending" to a short description of the wait you are holding (e.g. "waiting at captain's cabin, knocked, not admitted").
    - NEVER leave "followup" empty when the order sends you somewhere or on an errand.
 
 2) FACTUAL QUESTIONS (course, speed, status, contacts, what you see): answer briefly and accurately from the ship state AND from whatever the player has already established in the scene (contacts they've narrated, events that have happened). Never give a picture that conflicts with what's been established. Leave "followup" empty.
@@ -167,6 +169,7 @@ If your action changes the ship, fill "state_update" with ONLY the fields that c
 Leave state_update empty if nothing about the ship changes.
 
 Set "location" only when the scene moves you somewhere new; otherwise omit it.
+Set "pending" to the short action you are still holding, or "" if you have been released or finished it.
 
 Reply with JSON only."""
 
@@ -185,10 +188,14 @@ def _parse(content: str) -> dict:
 
 
 def _normalize(data: dict) -> dict:
+    pending = data["pending"] if "pending" in data else None
+    if pending is not None:
+        pending = str(pending)
     return {
         "say": data.get("say") or "...",
         "followup": data.get("followup") or "",
         "location": data.get("location") or "",
+        "pending": pending,
         "state_update": data.get("state_update") or {},
     }
 
@@ -238,20 +245,69 @@ async def _complete(client: AsyncOpenAI, model: str, messages: list, local: bool
         return {"say": text or "..."}
 
 
+def _slot(value: str) -> str:
+    """Keep interpolated prompt text from breaking str.format."""
+    return (value or "").replace("{", "(").replace("}", ")")
+
+
+class _Safe(dict):
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def _fill(template: str, **kwargs) -> str:
+    """Format the system prompt; live text cannot KeyError the reply."""
+    return template.format_map(_Safe({k: _slot("" if v is None else str(v)) for k, v in kwargs.items()}))
+
+
+def _kit_block(npc, order: str) -> str:
+    script = kit_for(npc, order)
+    if not script:
+        return ""
+    return (
+        "1MC REPERTOIRE -- this order is a pass-the-word / announcing evolution. "
+        "Pipe first if at sea, then pass the matching call VERBATIM (do not paraphrase):\n"
+        + _slot(script)
+    )
+
+
+def _pending_block(pending: str) -> str:
+    """Prompt slot: hold an in-progress action, or invite the model to start one."""
+    held = (pending or "").strip().replace("{", "(").replace("}", ")")
+    if held:
+        return (
+            f"YOUR CURRENT ACTION (HOLD THIS BEAT): {held}\n"
+            "You are IN THE MIDDLE of this. Stay there. Do not wander back to your station. "
+            "Do not invent that the wait ended, that you were admitted, or that the errand finished. "
+            "Keep \"location\" at the place this action is happening. "
+            "If the speaker releases you (\"Enter\", \"come in\", \"as you were\", \"belay\", "
+            "or a new order that supersedes this), resolve or drop the wait and set \"pending\" to \"\". "
+            "Otherwise set \"pending\" to the same short description so it persists."
+        )
+    return (
+        "YOUR CURRENT ACTION: none.\n"
+        "If you start a wait (knocking, standing by, holding a report), set \"pending\" to a short "
+        "description of it. Leave \"pending\" empty otherwise."
+    )
+
+
 async def npc_respond(npc, order: str, ship_summary: str, history: str,
                       speaker: str = "the officer on deck", location: str = "their usual station",
-                      log: str = "", speaker_authority: str = ""):
-    """Return a reply dict {say, followup, location, state_update}.
+                      log: str = "", speaker_authority: str = "", pending: str = ""):
+    """Return a reply dict {say, followup, location, pending, state_update}.
 
     Local LM Studio first; overflow to xAI when the GPU is busy, and fall back to
     xAI when LM Studio is unreachable."""
     global LAST_BACKEND, _local_inflight
-    system = SYSTEM_TEMPLATE.format(
+    system = _fill(
+        SYSTEM_TEMPLATE,
         persona=npc.persona,
         ship_display=SHIP["display"],
         ship_class=SHIP["class"],
         ship_knowledge=SHIP["knowledge"],
+        swo_knowledge=swo_for(npc),
         navy_reference=NAVY_REFERENCE,
+        specialist_kit=_kit_block(npc, order),
         speaker=speaker,
         speaker_authority=speaker_authority or (
             "The speaker's rank is not established. Be courteous and answer questions, but do NOT "
@@ -259,6 +315,7 @@ async def npc_respond(npc, order: str, ship_summary: str, history: str,
             "say-so until a known officer confirms the order."
         ),
         location=location,
+        pending_action=_pending_block(pending),
         chronicle=log or "(no earlier sessions logged yet)",
         ship_summary=ship_summary,
         history=history or "(quiet on the bridge)",

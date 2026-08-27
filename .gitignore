@@ -5,6 +5,8 @@ __pycache__/
 .env
 ship_state.json
 chronicle.json
+pending.json
+locations.json
 deploy/oracle-cloud-init.sh
 bot.log*
 *.corrupt
