@@ -510,6 +510,10 @@ async def on_guild_join(guild):
     await _sync_guild(guild)
 
 
+def _chan(message) -> str:
+    return f"#{getattr(message.channel, 'name', None) or message.channel.id}"
+
+
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
@@ -519,6 +523,7 @@ async def on_message(message: discord.Message):
     if not message.content:
         return
     if is_ooc(message.content):
+        log.info("%s %s: %r -> ignored (OOC)", _chan(message), message.author.display_name, message.content)
         return  # out-of-character / out-of-context aside -- the crew ignore it
 
     cs = channel_state(message.channel.id)
@@ -531,6 +536,7 @@ async def on_message(message: discord.Message):
 
     if is_signoff(message.content):
         cs.active.pop(message.author.id, None)  # "out"/hang-up ends the exchange
+        log.info("%s %s: %r -> sign-off (no reply)", _chan(message), label, message.content)
         return  # voice-procedure sign-off -> the crew give no further reply
 
     loc = player_location_from_text(message.content)  # "*heads to engineering*" -> track your position
@@ -540,7 +546,21 @@ async def on_message(message: discord.Message):
     reply_npc = await resolve_reply_target(message)
     npcs = await route(cs, message.author.id, message.content, time.monotonic(), reply_npc)
     if not npcs:
+        called, mentioned = find_addressed_split(message.content)
+        hailed = find_hailed_spaces(message.content)
+        reached = bool(called or mentioned or hailed or is_group_address(message.content) or reply_npc)
+        log.info("%s %s: %r -> no reply (%s)",
+                 _chan(message), label, message.content,
+                 "out of earshot" if reached else "not addressed")
+        if reached:
+            await message.channel.send(
+                "*(no answer — not in earshot, and that line is not on a circuit.)*",
+                delete_after=12,
+            )
         return
+    log.info("%s %s: %r -> %s",
+             _chan(message), label, message.content,
+             ", ".join(n.display_name for n in npcs))
 
     # Generate every addressed NPC's reply together (busy ones overflow to xAI),
     # then post them in the order they were named so the exchange reads in order.
