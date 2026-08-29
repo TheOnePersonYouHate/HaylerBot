@@ -129,6 +129,8 @@ Keep your actions, props, and surroundings consistent with this location and the
 CURRENT SHIP STATE:
 {ship_summary}
 
+{plot}
+
 THE STORY SO FAR (from earlier sessions -- for continuity):
 {chronicle}
 
@@ -137,7 +139,7 @@ RECENT BRIDGE CHATTER (oldest first, newest last):
 
 You have just been addressed directly. Respond in character, shaped by your personality above.
 
-THE PLAYER NARRATES REALITY: when the player states or narrates something happening -- a radar/sonar/visual contact, aircraft or a ship appearing, an IFF reading, weather, an explosion, a hit, a casualty, someone arriving, a system going down -- that IS what is happening in the scene (it often comes in *asterisks* or as a plain statement of events). Treat it as ESTABLISHED FACT and build on it. NEVER contradict it, deny it, "correct" it, or replace it with a different contact or reading of your own. If the player says a group of friendly aircraft appears on radar, then there ARE friendly aircraft on radar: report them exactly as described (count, bearing, IFF), add only detail that AGREES with what they said, and act on it. Recognize these updates and carry them forward, recording a changed situation in "state_update"'s "notes".
+THE PLAYER NARRATES REALITY: when the player states or narrates something happening -- a radar/sonar/visual contact, aircraft or a ship appearing, an IFF reading, weather, an explosion, a hit, a casualty, someone arriving, a system going down -- that IS what is happening in the scene (it often comes in *asterisks* or as a plain statement of events). Treat it as ESTABLISHED FACT and build on it. NEVER contradict it, deny it, "correct" it, or replace it with a different contact or reading of your own. The PLOT above is the current picture -- report those tracks (count, bearing, IFF) and do not invent a different one. If the player updates a contact, follow the new plot. Recognize these updates and carry them forward, recording a changed situation in "state_update"'s "notes".
 
 VARY YOUR LANGUAGE -- IMPORTANT: Look at your own previous lines in the RECENT BRIDGE CHATTER above. Do NOT reuse the same catchphrase, closing remark, sign-off, or sentence pattern you have already used (for example, don't keep ending with the same line like "I've got lines to tend"). Each reply must use fresh wording; never echo or paraphrase your own recent messages. If you are holding a CURRENT ACTION, stay in that beat -- vary the wording only, do not wander off or invent that the wait ended. If you are not holding an action, advance the moment.
 
@@ -293,7 +295,8 @@ def _pending_block(pending: str) -> str:
 
 async def npc_respond(npc, order: str, ship_summary: str, history: str,
                       speaker: str = "the officer on deck", location: str = "their usual station",
-                      log: str = "", speaker_authority: str = "", pending: str = ""):
+                      log: str = "", speaker_authority: str = "", pending: str = "",
+                      plot: str = ""):
     """Return a reply dict {say, followup, location, pending, state_update}.
 
     Local LM Studio first; overflow to xAI when the GPU is busy, and fall back to
@@ -318,6 +321,7 @@ async def npc_respond(npc, order: str, ship_summary: str, history: str,
         pending_action=_pending_block(pending),
         chronicle=log or "(no earlier sessions logged yet)",
         ship_summary=ship_summary,
+        plot=plot or "PLOT: none held.",
         history=history or "(quiet on the bridge)",
     )
     messages = [

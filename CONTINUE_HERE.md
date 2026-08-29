@@ -84,6 +84,8 @@ Prompt slimmed: history 60; SWO encyclopedia is `ship.swo` for nav/helm/lookout/
 
 Auto-recap after `RECAP_IDLE_SECONDS` (default 10 min) idle, and on clean shutdown. `/recap` still works.
 
+**Live plot.** Contacts and last facts live in `plot.json`, injected every `npc_respond`. Player narration (`*three friendly aircraft, bearing 045*`) and officer `notes` write tracks. Seaman notes cannot invent ghosts. `/plot` shows it; `/plot clear` wipes it; `/status` includes it. "No contacts" / "SPY is clean" clear the picture.
+
 **5. Prompt is too fat.**
 Every call gets SWO spec + `NAVY_REFERENCE` + 120-line history. Credits aren’t the issue; **attention** is. Last two lines of the scene get buried → loops, wrong contacts, “Commodoree.”
 

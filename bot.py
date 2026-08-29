@@ -28,6 +28,7 @@ from npcs import (
     is_movement_order, npc_by_display_name, player_location_from_text,
     rank_from_roles, rank_index, resolve_player, space_of,
 )
+from plot import Plot, load_plots, save_plots
 from ship import ShipState, load_maps, load_states, load_texts, save_maps, save_states, save_texts
 
 log = logging.getLogger("naval_bot")
@@ -102,6 +103,7 @@ _ship_states = load_states(config.STATE_FILE)  # {channel_id: ShipState}
 _logs = load_texts(config.LOG_FILE)            # {channel_id: persistent ship's-log summary}
 _pending = load_maps(config.PENDING_FILE)      # {channel_id: {npc.key: pending action}}
 _locations = load_maps(config.LOCATIONS_FILE)  # {channel_id: {npc.key: current location}}
+_plots = load_plots(config.PLOT_FILE)          # {channel_id: Plot}
 
 
 class CrewBot(commands.Bot):
@@ -131,6 +133,7 @@ class ChannelState:
     webhook: object = None
     active: dict = field(default_factory=dict)  # author_id -> (npc, expires_at): each speaker's own thread
     pending: dict = field(default_factory=dict)  # npc.key -> unresolved action (knocking, waiting, en route)
+    plot: Plot = field(default_factory=Plot)     # contacts + last facts (battle memory)
     summary: str = ""        # persistent ship's log carried over from earlier sessions
     last_activity: float = 0.0
     log_dirty: bool = False
@@ -149,8 +152,14 @@ def channel_state(channel_id: int) -> ChannelState:
         cs.summary = _logs.get(channel_id, "")
         cs.pending = dict(_pending.get(channel_id) or {})
         cs.locations = dict(_locations.get(channel_id) or {})
+        cs.plot = _plots.get(channel_id) or Plot()
         _channels[channel_id] = cs
     return cs
+
+
+def save_plot(cs: ChannelState) -> None:
+    _plots[cs.channel_id] = cs.plot
+    save_plots(_plots, config.PLOT_FILE)
 
 
 def _save_channel_map(store: dict, cs: ChannelState, data: dict, path: str) -> None:
@@ -271,6 +280,9 @@ def apply_update(cs: ChannelState, update: dict, speaker_rank: str = "") -> None
     if update.get("notes"):
         ship.notes = str(update["notes"])
         changed = True
+        # Officers may write the plot; junior enlisted cannot invent tracks.
+        if can_order_ship(speaker_rank) and cs.plot.ingest(str(update["notes"]), source=speaker_rank or "officer"):
+            save_plot(cs)
     if changed:
         _ship_states[cs.channel_id] = ship
         save_states(_ship_states, config.STATE_FILE)
@@ -479,6 +491,7 @@ async def _run_crew_chain(cs: ChannelState, channel, calls, spoken: set, ship_su
                     speaker=caller.display_name, location=cs.location_of(called_npc),
                     log=cs.summary, speaker_authority=authority_note(caller.rank),
                     pending=cs.pending.get(called_npc.key, ""),
+                    plot=cs.plot.render(cs.ship.alert),
                 )
         except Exception:
             log.exception("crew-chain reply failed for %s", called_npc.display_name)
@@ -548,6 +561,9 @@ async def on_message(message: discord.Message):
     if loc:
         cs.player_space[message.author.id] = loc
 
+    if cs.plot.ingest(message.content, source="player"):
+        save_plot(cs)
+
     reply_npc = await resolve_reply_target(message)
     npcs = await route(cs, message.author.id, message.content, time.monotonic(), reply_npc)
     if not npcs:
@@ -577,6 +593,7 @@ async def on_message(message: discord.Message):
                 npc_respond(npc, message.content, ship_summary, history,
                             speaker, cs.location_of(npc), cs.summary,
                             speaker_authority=speaker_authority,
+                            plot=cs.plot.render(cs.ship.alert),
                             pending=cs.pending.get(npc.key, ""))
                 for npc in npcs
             ),
@@ -619,7 +636,25 @@ async def status(interaction: discord.Interaction):
     held = [f"{n.display_name}: {cs.pending[n.key]}" for n in CREW if n.key in cs.pending]
     if held:
         info += "\nPending:\n  " + "\n  ".join(held)
+    plot = cs.plot.display(cs.ship.alert)
+    if plot:
+        info += "\n" + plot
     await interaction.response.send_message(f"```\n{info}\n```", ephemeral=True)
+
+
+@bot.tree.command(name="plot", description="Show or clear the CIC plot (contacts and last facts)")
+@discord.app_commands.describe(action="Leave empty to show. Use clear to wipe contacts.")
+async def plot_cmd(interaction: discord.Interaction, action: str = None):
+    cs = channel_state(interaction.channel_id)
+    act = (action or "").strip().lower()
+    if act in {"clear", "reset", "wipe"}:
+        cs.plot.clear()
+        cs.plot.facts = []
+        save_plot(cs)
+        await interaction.response.send_message("Plot cleared.", ephemeral=True)
+        return
+    body = cs.plot.display(cs.ship.alert)
+    await interaction.response.send_message(f"```\n{body}\n```", ephemeral=True)
 
 
 @bot.tree.command(name="crew", description="List the NPC crew and how to address them")

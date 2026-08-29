@@ -282,6 +282,7 @@ def test_prompt_shape():
         pending_action="none",
         chronicle="story {so far}",
         ship_summary="ok",
+        plot="PLOT: none",
         history='Hartley: "set {condition} Zebra"',
     )
     check("braces in history do not KeyError", "set (condition) Zebra" in filled)
