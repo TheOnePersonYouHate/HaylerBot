@@ -506,11 +506,23 @@ async def _run_crew_chain(cs: ChannelState, channel, calls, spoken: set, ship_su
 
 
 async def _sync_guild(guild) -> None:
-    try:
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync(guild=guild)
-    except Exception:
-        pass
+    """Push slash commands to one server. Failures used to be silent, which left
+    new commands (e.g. /plot) on one guild and missing on another."""
+    for attempt in (1, 2):
+        try:
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            log.info("synced %d slash command(s) to %s (%s)",
+                     len(synced), guild.name, guild.id)
+            return
+        except discord.HTTPException as exc:
+            log.warning("slash-command sync failed for %s (attempt %d): %s",
+                        getattr(guild, "name", guild), attempt, exc)
+            if attempt == 1:
+                await asyncio.sleep(2)
+        except Exception:
+            log.exception("slash-command sync failed for %s", getattr(guild, "name", guild))
+            return
 
 
 @bot.event
