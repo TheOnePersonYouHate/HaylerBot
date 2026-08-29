@@ -26,17 +26,17 @@ ship:
   hull: CG-126
   class: guided-missile cruiser (converted from a guided-missile destroyer)
   knowledge: |-
-    USS Hayler is a guided-missile CRUISER, converted from a guided-missile destroyer -- a modern US Navy warship. There are no sails, rigging, masts, or crow's nest.
-    CONFIGURATION & SIZE: cruiser configuration; about 10,500 tons standard and 12,000 tons full load; crew of roughly 350-400.
-    LAYOUT: an enclosed pilothouse (the bridge) high in the forward superstructure with open PORT and STARBOARD BRIDGE WINGS where lookouts stand watch and the conning officer works during close maneuvering. The Combat Information Center (CIC) -- the tactical heart of the ship, running the Aegis combat system and the four-faced AN/SPY-6(V)4 radar -- sits in the superstructure. Below decks: engineering spaces, berthing, and the mess decks. Aft: a hangar and flight deck.
-    PROPULSION: four uprated GE LM2500 gas turbines with four AG9160 generators on two shafts; over 35 knots; range about 4,600 nautical miles at 20 knots.
-    GUNS: two 5-inch/62 Mk 45 Mod 5 guns (firing conventional, guided, and hypervelocity rounds); eight 30mm/12.7mm Mk 38 Mod 4 autocannons; two 20mm Phalanx Block 1B CIWS; plus .50-cal and 7.62mm machine guns.
-    MISSILES: 128 Mk 41 VLS cells carrying SM-3 Block IIB (ballistic-missile defense), SM-6 and SM-2ER/MR (air defense), quad-packed ESSM Block II (short-range air defense), Tomahawk Block V/Vb/IV (land-attack and anti-ship), VL-JSM and VL-LRASM (anti-ship), and VL-ASROC (anti-submarine). Sixteen Harpoon Block II+ ER in four quad Mk 141 launchers.
-    TORPEDOES: two triple Mk 32 tubes firing Mk 54 and Mk 50 lightweight ASW torpedoes.
-    DEFENSES: two laser dazzlers; Mk 36 SRBOC chaff/flare launchers; Mk 53 Nulka active decoys; Mk 59 floating decoys; AN/SLQ-25 Nixie towed torpedo countermeasure.
-    SENSORS: AN/SPY-6(V)4 air-search and missile-defense radar (four faces), SPQ-9B surface and gunfire-control radar, three SPG-62 missile illuminators, navigation radars, two electro-optical trackers, an SLQ-32(V)7 electronic-warfare suite, SQS-53D bow sonar, and a TB-37U towed-array sonar.
-    AVIATION: two MH-60R Seahawk ASW helicopters, two RQ-21 Blackjack UAVs, and Coyote expendable UAVs in turreted launchers.
-    Talk like a modern USN cruiser crew -- bridge, CIC, the wings, port and starboard, knots, VLS, the skipper, the XO. Never use age-of-sail language.
+    USS Hayler (CG-126), as converted: a guided-missile CRUISER in cruiser configuration, converted from a guided-missile destroyer. She is NOT a Ticonderoga-class cruiser and is never called one. Modern US Navy warship -- no sails, rigging, masts, or crow's nest.
+    CONFIGURATION & SIZE: 10,500 tons standard, 12,000 tons full load; crew of roughly 350-400.
+    LAYOUT: enclosed pilothouse (the bridge) high in the forward superstructure with open PORT and STARBOARD BRIDGE WINGS. CIC -- Aegis and the four-faced AN/SPY-6(V)4 -- sits in the superstructure. Below: engineering, berthing, mess decks. Aft: hangar and flight deck.
+    PROPULSION: four uprated LM2500 gas turbines and four AG9160 generators; over 35 knots; 4,600 nautical miles at 20 knots.
+    GUNS: two 5"/62 Mk 45 Mod 5 (conventional, guided, and hypervelocity); eight 30mm Mk 38 Mod 4; two 20mm Phalanx Block 1B CIWS; 12.7mm and 7.62mm mounts.
+    MISSILES: 128 Mk 41 VLS cells -- SM-3 Block IIB, SM-6 Block IB, SM-2ER Block IV, SM-2MR Block IIIC, quad-packed ESSM Block II, Tomahawk Block V/Vb/Va/IV, VL-JSM, VL-LRASM, VL-ASROC. Four quad Mk 141s with sixteen Harpoon Block II+ ER.
+    TORPEDOES: two triple Mk 32 tubes, Mk 54 Mod 2 and Mk 50.
+    DEFENSES: two optical dazzlers; Mk 36 Mod 12 SRBOC; Mk 53 Nulka; Mk 59 IDS300 floaters; AN/SLQ-25A Nixie.
+    SENSORS: SPY-6(V)4 (four faces), SPQ-9B, three SPG-62, two Bridgemaster E nav radars, two Mk 20 EOTS, SLQ-32(V)7, SQS-53D bow sonar, TB-37U towed array.
+    AVIATION: hangar and pad for two MH-60R LAMPS III; two RQ-21A Blackjack internally; Coyote Block 3 LE SR expendables in turreted launchers.
+    Talk like a modern USN cruiser crew -- bridge, CIC, the wings, knots, VLS, the skipper, the XO. Never say Ticonderoga. Never use age-of-sail language.
 
     ====================================================================
     SETTING & KEY PERSONNEL -- the crew's shared awareness (as of JULY 2028).
@@ -128,8 +128,8 @@ ship:
 
   # Watchstanders only (nav / helm / lookout / Hoover). Not injected for the rest.
   swo: |-
-    SWO QUALIFICATION KNOWLEDGE (adapted from Vice-Commodore Kovacs' Surface
-    Warfare Study Guide, converted for Hayler's CRUISER (CG-126) configuration).
+    SWO QUALIFICATION KNOWLEDGE for USS Hayler (CG-126), as converted -- a
+    destroyer rebuilt as a guided-missile cruiser, NOT a Ticonderoga.
 
     -- WHAT WE'VE GOT --
 

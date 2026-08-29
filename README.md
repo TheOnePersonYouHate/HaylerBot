@@ -84,7 +84,7 @@ Do not commit `.env`. Player Discord IDs belong in your local `characters.yaml` 
 
 ## The world
 
-Default setting is **USS Hayler (CG-126)**, a Ticonderoga-class cruiser in a near-future campaign. The roster, ship knowledge, and ranks are all in `characters.yaml`. Edit that file to rename people, add a watchstander, or point the bot at a different ship.
+Default setting is **USS Hayler (CG-126)** — a guided-missile cruiser *converted from a guided-missile destroyer*, not a Ticonderoga. About 12,000 tons full load, 128-cell Mk 41 battery, SPY-6, near-future campaign. The roster, fit, and ranks are all in `characters.yaml`.
 
 Human players are listed under `players:` (Discord user ID and/or username → rank the crew should use). Keep real IDs off public remotes.
 
