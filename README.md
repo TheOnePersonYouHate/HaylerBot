@@ -1,76 +1,76 @@
-# Naval RP NPC Crew Bot
+# HaylerBot
 
-A private, single-server Discord bot that runs an AI **NPC crew** for naval
-roleplay. Address a crew member by name and they answer in character through
-their own webhook identity. Orders that change the ship (course, speed, alert)
-update a shared **ship state** the whole crew reasons from.
+A self-hosted Discord bot that runs an **NPC crew** for naval roleplay aboard a modern U.S. cruiser.
 
-The "brain" is a **local LLM via [LM Studio](https://lmstudio.ai)** (its
-OpenAI-compatible server) — no real API key, no per-token cost, nothing leaves
-your machine.
+You talk to the watch like a radio net. Address someone by name, rank, or station and they answer in character, under their own name. The bot tracks where people are, what the ship is doing, and what is on the plot — so a fight does not vanish when the chat scrolls.
+
+The point is not a chatbot with hats. It is a **watch bill**: who may speak, who may hear, who may change the ship.
+
+## Why it exists
+
+Tabletop and Discord naval RP fall apart in two places: the GM cannot voice every watchstander, and a language model will happily invent a new air picture, teleport the bosun, or set general quarters because a seaman joked about it.
+
+HaylerBot keeps **voice** in the model and **the world** in code.
+
+- Crew only answer when they can actually hear you (same space or a circuit).
+- Course, speed, and general quarters only change if the speaker is a warrant or officer.
+- Contacts live on a **plot**, not only in the last 60 lines of chatter.
+- Inference prefers a **local** model so play does not depend on a cloud round-trip. A cloud backend is optional fallback when the GPU is busy or offline.
 
 ## How it works
 
 ```
-Discord  <->  bot.py (this process)  <->  LM Studio (127.0.0.1:1234/v1)
-                 |
-                 +-- webhook -> each NPC speaks with its own name/avatar
-                 +-- ship_state.json (shared world state)
+Discord channel
+    -> bot.py     who is speaking, where they are, who can hear
+    -> brain.py   one LLM call per addressed NPC (local, then cloud)
+    -> webhook    that NPC posts as themselves
+    -> disk       ship state, plot, pending actions, ship's log
 ```
 
-- **Hear** — the bot reads messages in one RP channel (Message Content intent).
-- **Think** — `brain.py` asks the model for JSON: `{ "say": ..., "state_update": ... }`.
-- **Speak** — `speak()` posts the reply via a webhook as that crew member.
-- **Remember** — recent chatter (rolling) + persistent `ship_state.json`.
+Each reply is a **new, short request**. The model does not keep a 500k-token thread. The bot rebuilds what matters every time: persona, ship, plot, held actions, last stretch of chat, your line.
 
-Example: you type `Helmsman, come right to course 240.` ->
-**Helmsman Cole:** "Aye, sir. Right standard rudder, coming to course 240." ->
-the ship's heading becomes 240, and a moment later he reports *steady on course*.
+| Layer | Job |
+|---|---|
+| `characters.yaml` | Ship, roster, ranks, optional human players |
+| `npcs.py` | Addressing, earshot, circuits, movement orders |
+| `bot.py` | Discord, routing, webhooks, slash/prefix commands |
+| `brain.py` | Prompts and LLM backends |
+| `plot.py` | CIC contacts and last facts |
+| `ship.py` | Course, speed, alert — crash-safe JSON |
+
+## Play in one minute
+
+```
+*In CIC*
+Lieutenant Hoover, report.
+*three friendly aircraft, bearing 045, IFF friendly*
+!plot
+```
+
+`*In CIC*` places you. Naming Hoover talks to him. The asterisk line writes the plot. `!plot` shows it.
+
+Full command list: **[COMMANDS.md](COMMANDS.md)**.
+
+| Command | What it does |
+|---|---|
+| `/plot` or `!plot` | Show the CIC plot |
+| `/plot action:clear` or `!plot clear` | Wipe the plot |
+| `/status` | Ship, pending waits, plot |
+| `/crew` | NPCs and how to address them |
+| `/where` | Your space and who is in earshot |
+| `/roster` | Humans the crew will take orders from |
+| `/recap` | Write this session into the ship's log |
+
+On a host Discord server, an admin may need to enable new slash commands under **Integrations**. `!plot` does not need that.
 
 ## Setup
 
-> **Fast path:** do step 1 to get a bot token, then run
-> `.\.venv\Scripts\python.exe setup.py`. The wizard validates the token, prints
-> the invite URL, finds your server + channel IDs, and writes `.env` for you —
-> automating steps 2-5. The manual steps below are the fallback.
+1. Create a Discord application. Enable **Message Content Intent**. Invite the bot with `bot` + `applications.commands` and permission to **Manage Webhooks**.
+2. Copy `.env.example` to `.env`. Set `DISCORD_TOKEN` and `RP_CHANNEL_ID` (one or more channel IDs).
+3. Optional local brain: [LM Studio](https://lmstudio.ai) on `http://127.0.0.1:1234/v1`.
+4. Optional cloud fallback: `XAI_API_KEY` in `.env`.
+5. Install and run:
 
-### 1. Create the Discord app + bot
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) -> **New Application**.
-2. **Bot** tab -> **Reset Token** -> copy it (this is `DISCORD_TOKEN`).
-3. Still on the **Bot** tab -> enable **Message Content Intent** under *Privileged Gateway Intents*.
-
-### 2. Invite the bot to your server
-Use this URL (replace `CLIENT_ID` with your app's Application ID):
-
-```
-https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&scope=bot+applications.commands&permissions=536939520
-```
-
-`536939520` = View Channel + Send Messages + Read Message History + **Manage Webhooks**
-(Manage Webhooks is required so the crew can post under their own names).
-
-### 3. Get the IDs
-Enable **Developer Mode** (Discord Settings -> Advanced), then right-click your
-server icon and the RP channel to copy their IDs.
-
-### 4. Start the local LLM (LM Studio)
-1. Load a model — `google/gemma-4-31b` is a great fit on a 32 GB GPU:
-   ```powershell
-   lms load google/gemma-4-31b --gpu max
-   ```
-2. Start the OpenAI-compatible server (or use the app's **Developer** tab):
-   ```powershell
-   lms server start
-   ```
-   It listens on `http://127.0.0.1:1234/v1`. No API key needed — it's local.
-
-### 5. Configure the bot
-```powershell
-copy .env.example .env
-# then edit .env and fill in DISCORD_TOKEN, GUILD_ID, RP_CHANNEL_ID
-```
-
-### 6. Install + run
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -78,109 +78,21 @@ pip install -r requirements.txt
 python bot.py
 ```
 
-## One-command start
+Or `.\run.ps1` / `.\run.bat` on Windows (starts LM Studio if present, then the bot). Portable launchers: [PORTABLE.md](PORTABLE.md). Standalone build: [build/BUILD.md](build/BUILD.md). Always-on host: [deploy/DEPLOY.md](deploy/DEPLOY.md).
 
-Run **`.\run.ps1`** (or double-click **`run.bat`**) — that's the whole thing.
-The first run bootstraps; every run after just starts:
+Do not commit `.env`. Player Discord IDs belong in your local `characters.yaml` only.
 
-1. Creates the virtual env + installs dependencies (first run only)
-2. Runs the Discord setup wizard if `.env` has no token yet
-3. Starts the LM Studio server and loads `LLM_MODEL`
-4. Launches the bot
+## The world
 
-```powershell
-.\run.ps1
-```
+Default setting is **USS Hayler (CG-126)**, a Ticonderoga-class cruiser in a near-future campaign. The roster, ship knowledge, and ranks are all in `characters.yaml`. Edit that file to rename people, add a watchstander, or point the bot at a different ship.
 
-(If LM Studio can't start, the bot still runs on the xAI fallback when set.)
+Human players are listed under `players:` (Discord user ID and/or username → rank the crew should use). Keep real IDs off public remotes.
 
-## Using it
+## Design rules (short)
 
-Full playbook: **[COMMANDS.md](COMMANDS.md)**.
+- **Code owns the ship.** The model proposes; helm and GQ are refused unless the speaker is warrant+.
+- **Earshot is real.** A shout in CIC does not reach the main deck. 1MC / 21MC / a station hail does.
+- **Narration is fact.** `*three friendly aircraft, bearing 045*` is what is happening. The plot stores it.
+- **Scrollback is not memory.** History is a short window for voice. Plot, pending actions, locations, and the ship's log are what survive.
 
-Address a crew member by name in the RP channel:
-
-- `McTane, come to course 090 and make turns for 15 knots.`
-- `Lieutenant Hoover, report.`
-- `Bosun, sound general quarters.`
-- `*In CIC*` then talk to whoever is there.
-- `*three friendly aircraft, bearing 045, IFF friendly*` then `/plot` or `!plot`.
-
-### Commands
-
-| Command | Where | What it does |
-|---|---|---|
-| `/plot` | Slash (you only) | Show the CIC plot |
-| `/plot action:clear` | Slash (you only) | Wipe the plot |
-| `!plot` | Prefix (channel) | Same as `/plot` — use when slash is locked |
-| `!plot clear` | Prefix (channel) | Same as `/plot action:clear` |
-| `/status` | Slash (you only) | Course, speed, alert, pending waits, plot |
-| `/crew` | Slash (you only) | NPC list, aliases, locations |
-| `/where` | Slash (you only) | Your space and who is in earshot |
-| `/roster` | Slash (you only) | Humans and the rank the crew use |
-| `/recap` | Slash (you only) | Write this session into the ship's log |
-
-On a host server, an admin may need to enable new slash commands under **Integrations → Hayler Bot**. `!plot` does not need that.
-
-## The crew (defined in `characters.yaml`)
-
-| Name | Rank | Rate | Billet | Address as |
-|---|---|---|---|---|
-| Elias Cole | PO2 | Quartermaster | Helmsman | helm, helmsman, quartermaster, cole |
-| Adaline Vance | CPO | Quartermaster | Navigator | navigator, nav, vance |
-| Tomas Hartley | CPO | Boatswain's Mate | Bosun | bosun, boatswain, bos'n, hartley |
-| Jonah Pike | Seaman | Boatswain's Mate (striker) | Lookout | lookout, watch, pike |
-| Rourke Doyle | PO1 | Machinist's Mate | Engineer | engineer, engine room, chief, doyle |
-
-## Editing the crew (character reference sheet)
-
-All crew live in **`characters.yaml`** — the single source of truth for the
-roster. Each NPC's model persona is *generated* from these fields, so just edit
-the sheet (no code changes) to rename, re-rank, re-personalise, add, or remove
-crew:
-
-```yaml
-  - key: gunner                 # stable id (don't reuse / rename casually)
-    name: Mara Quill
-    rank: Petty Officer 1st Class
-    rate: Gunner's Mate
-    billet: Gunnery
-    aliases: [guns, gunner, quill]
-    personality: >-
-      Coolly precise and a little bloodthirsty. Lives for a clean firing
-      solution and counts every round.
-    avatar_url:                 # optional image URL -> visual identity in chat
-```
-
-In chat each NPC appears as **`<billet> <surname>`** (e.g. "Helmsman Cole").
-Set `avatar_url` to any image URL to give them a distinct face.
-
-## Swapping the model
-
-Any model loaded in LM Studio works — just set `LLM_MODEL` in `.env` to its
-identifier (see `lms ps` or the LM Studio UI). Larger models give more
-consistent personas; smaller ones respond faster.
-
-## Always-on fallback (xAI / Grok)
-
-The bot tries your **local** model first (free, private). If LM Studio isn't
-running, it automatically falls back to the **xAI cloud API** so the crew never
-goes dark. Turn it on by filling these in `.env`:
-
-```
-XAI_API_KEY=xai-...          # from https://console.x.ai (blank = no fallback)
-XAI_MODEL=grok-4-latest      # set to a model your account supports
-```
-
-- **Local up** -> uses LM Studio. **Local down** -> uses xAI. No restart needed.
-- `/status` shows which backend served the last reply.
-- Trade-off: local is free + private; the cloud fallback keeps the crew online
-  even when LM Studio is closed.
-
-## Extending
-
-- **More ship state** — add fields to `ShipState` in `ship.py` and list them in
-  the schema + prompt in `brain.py`.
-- **Crew-to-crew banter** — have one NPC's reply trigger another.
-- **Real turn simulation** — model heading change over time instead of the
-  simple `steady_up` delay.
+Deeper internals: **[ARCHITECTURE.md](ARCHITECTURE.md)**.

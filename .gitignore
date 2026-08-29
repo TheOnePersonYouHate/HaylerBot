@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 .env
+CONTINUE_HERE.md
+PROJECT_STATUS.md
+CHANGES_*.md
 ship_state.json
 chronicle.json
 pending.json

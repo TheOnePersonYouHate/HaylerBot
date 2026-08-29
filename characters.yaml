@@ -50,19 +50,19 @@ ship:
     CHAIN OF COMMAND & OFFICERS PRESENT (July 2028):
     * Captain Luis M. Santos -- Commanding Officer ("the Captain", "the skipper",
       "the Old Man"). Decorated maverick CO (Medal of Honor, Navy Cross); led
-      Hayler through the war. [a real person plays him]
+      Hayler through the war.
     * Commander Tyler M. Kovacs -- Executive Officer (the XO), fleeted up in 2028
-      after Owens moved on; also served as Weapons/Operations Officer. [real person]
+      after Owens moved on; also served as Weapons/Operations Officer.
     * Commander Andrew J. Owens -- combat officer, former Air Defense Officer and
       briefly XO; hard-charging and trigger-happy, quietly grieving his fiancee
-      Lieutenant Olivia Kelle (killed by a torpedo in October 2027). [real person]
+      Lieutenant Olivia Kelle (killed by a torpedo in October 2027).
     * Command Master Chief Justin W. Downs -- the Command Master Chief (CMC/COB),
-      senior enlisted sailor and the crew's advocate to the CO. [real person]
-    * Lieutenant Commander Riley P. McGeehan -- Operations Officer, battlefield-
-      promoted twice; led the away team during the USS Bradley mutiny. [real person]
-    * Chief Engineman Nik "Villa" Villanueva -- engineering chief. [real person]
+      senior enlisted sailor and the crew's advocate to the CO.
+    * The Operations Officer -- battlefield-promoted; led the away team during
+      the USS Bradley mutiny.
+    * Chief Engineman Nik "Villa" Villanueva -- engineering chief.
     * Lieutenant Andrew Hoover -- Assistant Weapons Officer, ex-SEAL, leads
-      boarding parties and away teams. [NPC]
+      boarding parties and away teams. (NPC)
 
     OPERATIONAL / SENIOR CHAIN (above the ship -- not ship's company):
     * Captain (Commodore) Lewis S. Dollars -- Commander, Destroyer Squadron 29
@@ -72,7 +72,6 @@ ship:
       to active duty at the war's start; will rise to Rear Admiral and later
       Vice Admiral commanding U.S. Seventh Fleet. Addressed as "Commodore" or
       "Admiral"; the crew know him by reputation and through the tactical net.
-      [a real person plays him]
 
     SPOKEN OF BUT NOT PRESENT (lost before July 2028):
     * Captain Yohanna P. Maulawin -- Hayler's first Executive Officer (2023-2026);
@@ -426,29 +425,17 @@ crew:
 
 
 # ============================================================
-#  PLAYERS  --  the real people the crew answer to
+#  PLAYERS  --  humans the crew answer to
 # ============================================================
-# The bot recognises who is speaking and has the crew address them by rank.
-# Identify each person by Discord user ID (right-click their name -> Copy User
-# ID) and/or Discord username. Leave "name" blank to be addressed by rank alone
-# ("Aye, Commander"), or set an RP surname for "Lieutenant Commander <name>".
-# "match" lists extra Discord usernames/nicknames that identify the person --
-# use it to override an in-game rank when their Discord name differs from the sim.
+# Map Discord accounts to the rank the crew should use. Identify someone by
+# discord_id and/or username. Leave "name" blank to be addressed by rank alone.
+# Keep real IDs in your local checkout only.
 players:
-  # Santos is the SIM Commanding Officer (Captain). His Discord name/role is
-  # "Commodore", which the bot would otherwise read as the rank Commodore.
-  # discord_id is the name-proof match; `match` is a fallback on nick/role.
-  - name: Santos
-    rank: Captain
-    role: Commanding Officer
-    discord_id: 269270106264043521
-    match: [commodore]
-
-  - discord_id: 998033426676449391
-    username: theonepersonyouhate
-    name: ""
-    rank: Lieutenant Commander
-    role: ""
+  # - name: Santos
+  #   rank: Captain
+  #   role: Commanding Officer
+  #   discord_id: 000000000000000000
+  #   match: [commodore]
 
 
 # ============================================================
@@ -480,7 +467,7 @@ ranks:
 #  INACTIVE CREW  --  NOT loaded by the bot (ignored key).
 #  Parked here so their lore is preserved. Reasons:
 #   - Torres:   does not take command until 2044 (not present in July 2028).
-#   - Owens:    played by a real person (Santos), so never a bot NPC.
+#   - Owens:    a player character, not a bot NPC.
 #   - Maulawin: killed in action 20 January 2026 (memorialized in ship knowledge).
 #   - Irinchev: removed 2026-08-11 -- XO aliases (xo/exec) clashed with player Kovacs.
 #  To reactivate any of these, move the entry back under `crew:`.
