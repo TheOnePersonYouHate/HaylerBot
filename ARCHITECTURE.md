@@ -14,7 +14,7 @@ The model is stateless. Every NPC reply is a fresh chat completion. `brain.py` b
 6. That NPC’s location and any **pending** action (knocking, en route, waiting)
 7. Current ship state and the **plot**
 8. Ship’s log (chronicle) from earlier sessions
-9. The last ~60 channel lines
+9. The last ~80 channel lines
 10. The line just typed
 
 A typical call is a few thousand tokens. The local server may reserve a larger window; unused reserve is not extra memory of the scene.

@@ -25,8 +25,9 @@ from brain import npc_respond
 from npcs import (
     CREW, SHIP, announcement_followup, authority_note, can_order_ship, can_reach,
     comms_channel, find_addressed_split, find_called, find_hailed_spaces,
-    is_announcement_order, is_group_address, is_movement_order,
-    npc_by_display_name, player_location_from_text, rank_from_roles, rank_index,
+    is_announcement_order, is_far_end_report, is_group_address, is_movement_order,
+    looks_like_circuit_hold, npc_by_display_name, player_location_from_text,
+    rank_from_roles, rank_index,
     resolve_player, space_of,
 )
 from plot import Plot, load_plots, save_plots
@@ -39,7 +40,7 @@ intents.message_content = True  # privileged: enable in the Developer Portal
 
 ENGAGE_WINDOW = config.CONTINUITY_SECONDS  # seconds before the crew disengage
 # (wait longer than this without addressing anyone to talk out-of-context freely)
-HISTORY_LIMIT = 60  # how many recent messages per channel the crew "remember"
+HISTORY_LIMIT = 80  # recent channel lines injected each call (plot holds the fight)
 FOLLOWUP_DELAY = 15  # seconds before an NPC posts its follow-up beat (arriving, reporting, etc.)
 LOCAL_CONTEXT = 24000  # context length the auto-loader requests from LM Studio
 MAX_CREW_CHAIN = 3  # cap on crew-to-crew (NPC->NPC) replies per player turn -> can't loop
@@ -141,6 +142,37 @@ class ChannelState:
 
     def location_of(self, npc) -> str:
         return self.locations.get(npc.key) or npc.station or "their usual station"
+
+    def thread_npc(self, author_id: int, now: float):
+        """Last NPC this speaker engaged, if the timer is live OR that NPC is mid-errand."""
+        prev = self.active.get(author_id)
+        if prev is None:
+            return None
+        npc, expires = prev
+        if now < expires or self.pending.get(npc.key):
+            return npc
+        return None
+
+    def npc_on_hold(self, author_id: int = None):
+        """NPC waiting, en route, or on a circuit -- prefer this speaker's last thread."""
+        if author_id is not None:
+            prev = self.active.get(author_id)
+            if prev and self.pending.get(prev[0].key):
+                return prev[0]
+        for n in CREW:
+            held = (self.pending.get(n.key) or "").lower()
+            if not held:
+                continue
+            if (
+                held.startswith("en route")
+                or "wait" in held
+                or "knock" in held
+                or "circuit" in held
+                or "phone" in held
+                or "sonar" in held
+            ):
+                return n
+        return None
 
 
 _channels = {}
@@ -355,10 +387,11 @@ async def route(cs: ChannelState, author_id: int, text: str, now: float, reply_n
     comms = channel is not None or bool(hailed)  # a ship's circuit is in use -> a hail carries
     strict = cs.channel_id in config.STRICT_CHANNEL_IDS
     prev = cs.active.get(author_id)
+    live = cs.thread_npc(author_id, now)
     if called or station_npcs or group:
         here = cs.player_space.get(author_id)
-        if here is None and prev is not None and now < prev[1]:
-            here = space_of(cs.location_of(prev[0]))          # you're with your active crew
+        if here is None and live is not None:
+            here = space_of(cs.location_of(live))          # you're with your active crew
         if here is None and called:
             here = space_of(cs.location_of(reply_npc or called[0]))  # bootstrap: first contact only
         if here is not None:
@@ -387,12 +420,17 @@ async def route(cs: ChannelState, author_id: int, text: str, now: float, reply_n
         npcs = mentioned if here is None else [n for n in mentioned if space_of(cs.location_of(n)) == here]
         if not npcs:
             return []
-    elif not strict and prev is not None and now < prev[1]:
+    elif is_far_end_report(text):
+        held = cs.npc_on_hold(author_id) or live
+        if held is None:
+            return []
+        npcs = [held]
+    elif not strict and live is not None:
         if is_narration(text):
             return []  # a pure scene/story beat -- the crew note it, but it's no one's cue to reply
-        if await brain.is_continuation(prev[0], text, "\n".join(cs.history)):
-            npcs = [prev[0]]
-            cs.player_space[author_id] = space_of(cs.location_of(prev[0]))
+        if cs.pending.get(live.key) or await brain.is_continuation(live, text, "\n".join(cs.history)):
+            npcs = [live]
+            cs.player_space[author_id] = space_of(cs.location_of(live))
         else:
             return []
     else:
@@ -448,6 +486,10 @@ def _apply_pending(cs: ChannelState, npc, reply: dict, player_text: str = "") ->
         return
     if is_release(player_text):
         set_pending(cs, npc.key, "")
+        return
+    say = reply.get("say") or ""
+    if looks_like_circuit_hold(say) or looks_like_circuit_hold(player_text):
+        set_pending(cs, npc.key, "on circuit: " + re.sub(r"\s+", " ", say)[:80])
 
 
 async def _post_reply(cs: ChannelState, channel, npc, reply: dict,

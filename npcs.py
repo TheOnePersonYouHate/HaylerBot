@@ -532,6 +532,36 @@ def announcement_followup(order: str, plot=None) -> str:
     return ""
 
 
+# Player voicing the far end of a circuit (no ST NPC on the roster).
+_FAR_END = re.compile(
+    r"(?:"
+    r"\*+[^*]*\b(?:st\d*|sonar(?:\s+shack)?|sonarman)\b[^*]*\*"
+    r"|"
+    r"\b(?:st\d*|sonar(?:\s+shack)?)\s+(?:answers?|reports?|aye)\b"
+    r"|"
+    r"\b(?:answers?|reports?)\b.{0,30}\b(?:st\d*|sonar(?:\s+shack)?)\b"
+    r")",
+    re.I,
+)
+
+_CIRCUIT_HOLD = re.compile(
+    r"sound-?powered|\bsonar shack\b|\b21\s*-?mc\b|\b1?jv\b|"
+    r"reaches for the (?:phone|mic|circuit)|keys the (?:mic|21)|"
+    r"asks? the sonar|calls? (?:the )?sonar",
+    re.I,
+)
+
+
+def is_far_end_report(text: str) -> bool:
+    """True when the player is voicing sonar / ST / the shack on a circuit."""
+    return bool(_FAR_END.search(text or ""))
+
+
+def looks_like_circuit_hold(text: str) -> bool:
+    """True when a line is picking up a phone / 21MC / asking sonar."""
+    return bool(_CIRCUIT_HOLD.search(text or ""))
+
+
 def can_reach(caller_location: str, callee_location: str, text: str) -> bool:
     """True if callee can hear caller: same earshot space, or the line rides a circuit."""
     if comms_channel(text) is not None or find_hailed_spaces(text):

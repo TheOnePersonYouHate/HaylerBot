@@ -7,6 +7,7 @@ Run from the repo root:
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,8 +19,8 @@ os.environ.setdefault("XAI_API_KEY", "")
 
 from npcs import (  # noqa: E402
     CREW, SHIP, announcement_followup, can_order_ship, can_reach,
-    find_all_addressed, find_called, is_announcement_order, is_movement_order,
-    kit_for, swo_for,
+    find_all_addressed, find_called, is_announcement_order, is_far_end_report,
+    is_movement_order, kit_for, looks_like_circuit_hold, swo_for,
 )
 from ship import ShipState, load_maps, save_maps  # noqa: E402
 
@@ -260,12 +261,35 @@ def test_teleports():
           ))
 
 
+def test_holds_and_st():
+    print("holds and ST")
+    import bot
+    from ship import ShipState
+
+    check("ST answers is far-end", is_far_end_report("*ST answers* Aye, LT."))
+    check("sonar shack report is far-end",
+          is_far_end_report("*sonar shack reports: no contacts*"))
+    check("deck chatter is not far-end",
+          not is_far_end_report("Bosun, how's the deck?"))
+    check("phone pickup is a circuit hold",
+          looks_like_circuit_hold("reaches for the sound-powered phone circuit to the sonar shack"))
+
+    hoover = _npc("hoover")
+    cs = bot.ChannelState(channel_id=12, ship=ShipState())
+    expired = time.monotonic() - 5
+    cs.active[1] = (hoover, expired)
+    check("expired thread with no pending is dead", cs.thread_npc(1, time.monotonic()) is None)
+    cs.pending[hoover.key] = "on circuit: sound-powered to sonar shack"
+    check("expired thread with pending stays live", cs.thread_npc(1, time.monotonic()) is hoover)
+    check("npc_on_hold finds Hoover", cs.npc_on_hold(1) is hoover)
+
+
 def test_prompt_shape():
     print("prompt shape")
     import bot
     import brain
 
-    check("history window is 60", bot.HISTORY_LIMIT == 60)
+    check("history window is 80", bot.HISTORY_LIMIT == 80)
     check("shared knowledge dropped the SWO encyclopedia",
           "Type 003 Fujian" not in SHIP["knowledge"])
     check("SWO brick still exists", "Type 003 Fujian" in SHIP["swo"])
@@ -309,6 +333,7 @@ def main():
     test_location_persist()
     test_hartley_kit()
     test_teleports()
+    test_holds_and_st()
     test_prompt_shape()
     print("all passed")
 

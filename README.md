@@ -14,7 +14,7 @@ HaylerBot keeps **voice** in the model and **the world** in code.
 
 - Crew only answer when they can actually hear you (same space or a circuit).
 - Course, speed, and general quarters only change if the speaker is a warrant or officer.
-- Contacts live on a **plot**, not only in the last 60 lines of chatter.
+- Contacts live on a **plot**, not only in the last 80 lines of chatter.
 - Inference prefers a **local** model so play does not depend on a cloud round-trip. A cloud backend is optional fallback when the GPU is busy or offline.
 
 ## How it works
