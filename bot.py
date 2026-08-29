@@ -455,7 +455,7 @@ async def _post_reply(cs: ChannelState, channel, npc, reply: dict,
     """Post one NPC line, apply ship/location changes, schedule any follow-up. Returns
     the spoken line (for crew-to-crew scanning) or None if nothing could be posted."""
     if not (reply.get("followup") or "").strip() and is_announcement_order(player_text):
-        canned = announcement_followup(player_text)
+        canned = announcement_followup(player_text, cs.plot)
         if canned:
             reply["followup"] = canned
     if not await speak(cs, channel, npc, reply["say"]):

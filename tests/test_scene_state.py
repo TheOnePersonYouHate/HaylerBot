@@ -190,9 +190,9 @@ def test_hartley_kit():
     hartley = _npc("bosun")
     vance = _npc("navigator")
     check("persona is just voice (no GQ script)",
-          "Set Condition Zebra" not in hartley.persona)
+          "material condition Zebra" not in hartley.persona)
     check("kit still has the verbatim GQ call",
-          "Set Condition Zebra" in hartley.kit)
+          "material condition Zebra" in hartley.kit)
     check("GQ order is an announcement",
           is_announcement_order("Bosun, sound general quarters."))
     check("1MC pass-the-word is an announcement",
@@ -202,7 +202,7 @@ def test_hartley_kit():
     check("report-to is not an announcement",
           not is_announcement_order("Bosun, report to the captain's cabin."))
     check("kit attaches on GQ",
-          "Set Condition Zebra" in kit_for(hartley, "Bosun, sound general quarters."))
+          "material condition Zebra" in kit_for(hartley, "Bosun, sound general quarters."))
     check("kit stays off on chatter",
           kit_for(hartley, "Bosun, how's the deck looking?") == "")
     check("other crew have no kit",
@@ -212,8 +212,13 @@ def test_hartley_kit():
     silent = brain._kit_block(hartley, "Hartley, got a minute?")
     check("prompt kit on colors", "Attention to colors" in attached)
     check("prompt kit off on banter", silent == "")
-    canned = announcement_followup("Bosun, sound general quarters, set condition zebra")
+    canned = announcement_followup(
+        "Bosun, sound general quarters, set condition zebra -- five drones overhead"
+    )
     check("GQ followup is the 1MC call", "General quarters, general quarters" in canned)
+    check("GQ includes route of travel", "forward and up to starboard" in canned)
+    check("GQ includes material condition", "material condition Zebra" in canned)
+    check("GQ reason from drones is air", "Reason for general quarters: air" in canned)
     check("GQ followup is not a drill unless said", "not a drill" in canned.lower())
 
 

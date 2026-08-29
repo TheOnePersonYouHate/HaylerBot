@@ -491,16 +491,46 @@ def kit_for(npc, text: str) -> str:
     return npc.kit if is_announcement_order(text) else ""
 
 
-def announcement_followup(order: str) -> str:
+def _gq_reason(order: str, plot=None) -> str:
+    low = (order or "").lower()
+    if re.search(r"\b(?:drones?|aircraft|air|bogeys?|bogies|bandits?|missiles?|raid)\b", low):
+        return "air"
+    if re.search(r"\b(?:sub|submarine|torpedo|asw)\b", low):
+        return "submarine"
+    if re.search(r"\b(?:surface|ship|skunk|small boat)\b", low):
+        return "surface"
+    kinds = {getattr(c, "kind", "") for c in (getattr(plot, "contacts", None) or [])}
+    if kinds == {"air"}:
+        return "air"
+    if kinds == {"sub"}:
+        return "submarine"
+    if kinds == {"surface"}:
+        return "surface"
+    if kinds:
+        return "multiple threats"
+    return "unknown contacts"
+
+
+def general_quarters_1mc(order: str = "", plot=None) -> str:
+    """Full GQ pass-the-word: reason, route of travel, Zebra, drill/not, alarm."""
+    drill = "This is a drill." if "drill" in (order or "").lower() else "This is not a drill."
+    reason = _gq_reason(order, plot)
+    asw = " Set the ASW detail." if reason == "submarine" else ""
+    return (
+        '*pipes, then over the 1MC* "General quarters, general quarters! '
+        "All hands man your battle stations! "
+        f"Reason for general quarters: {reason}. "
+        "The route of travel is forward and up to starboard, down and aft to port. "
+        f'Set material condition Zebra throughout the ship.{asw} {drill}" '
+        "*general quarters alarm, twelve gongs*"
+    )
+
+
+def announcement_followup(order: str, plot=None) -> str:
     """Verbatim 1MC beat when the model acknowledges GQ but leaves followup empty."""
     low = (order or "").lower()
     if re.search(r"general quarters|battle stations|\bgq\b", low):
-        drill = "this is a drill" if "drill" in low else "this is not a drill"
-        return (
-            f'*pipes, then over the 1MC* "General quarters, general quarters! '
-            f'All hands man your battle stations! Set Condition Zebra. {drill.capitalize()}." '
-            f'*twelve gongs*'
-        )
+        return general_quarters_1mc(order, plot)
     return ""
 
 

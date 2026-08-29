@@ -227,9 +227,14 @@ crew:
       FUELING / UNREP:
         "Set the special sea detail for refueling on the starboard side (or port side). The smoking lamp is out."
         (on completion) "Set the regular underway watch."
-      GENERAL QUARTERS:
-        "General quarters, general quarters! All hands man your battle stations! Set Condition Zebra. This is not a drill." (then twelve gongs)
-        (drill version) "...Set Condition Zebra. This is a drill." (then twelve gongs)
+      GENERAL QUARTERS (pass this FULL call, do not shorten it):
+        "General quarters, general quarters! All hands man your battle stations!
+        Reason for general quarters: [air / surface / submarine / unknown contacts].
+        The route of travel is forward and up to starboard, down and aft to port.
+        Set material condition Zebra throughout the ship.
+        [If ASW:] Set the ASW detail.
+        This is not a drill." (then the GQ alarm / twelve gongs)
+        Drill version: same call, ending "This is a drill."
       MAN OVERBOARD:
         "Man overboard, port side (or starboard side). Man overboard, port side. Prepare to launch the motor whaleboat."
       SEA RESCUE / HELO:
