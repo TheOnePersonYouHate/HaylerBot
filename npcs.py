@@ -130,7 +130,7 @@ class Player:
 def load_players(path: str):
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     players = []
-    for entry in data.get("players", []):
+    for entry in data.get("players") or []:
         players.append(
             Player(
                 name=entry.get("name") or "",
@@ -489,6 +489,19 @@ def kit_for(npc, text: str) -> str:
     if not getattr(npc, "kit", ""):
         return ""
     return npc.kit if is_announcement_order(text) else ""
+
+
+def announcement_followup(order: str) -> str:
+    """Verbatim 1MC beat when the model acknowledges GQ but leaves followup empty."""
+    low = (order or "").lower()
+    if re.search(r"general quarters|battle stations|\bgq\b", low):
+        drill = "this is a drill" if "drill" in low else "this is not a drill"
+        return (
+            f'*pipes, then over the 1MC* "General quarters, general quarters! '
+            f'All hands man your battle stations! Set Condition Zebra. {drill.capitalize()}." '
+            f'*twelve gongs*'
+        )
+    return ""
 
 
 def can_reach(caller_location: str, callee_location: str, text: str) -> bool:

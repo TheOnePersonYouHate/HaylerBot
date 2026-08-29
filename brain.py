@@ -268,7 +268,9 @@ def _kit_block(npc, order: str) -> str:
         return ""
     return (
         "1MC REPERTOIRE -- this order is a pass-the-word / announcing evolution. "
-        "Pipe first if at sea, then pass the matching call VERBATIM (do not paraphrase):\n"
+        "\"say\" is ONLY the acknowledge and stepping to the 1MC (Aye, sir, *pipes*). "
+        "\"followup\" is REQUIRED and MUST be the matching call VERBATIM over the 1MC "
+        "(do not paraphrase, do not skip it, do not put the call only in \"say\"):\n"
         + _slot(script)
     )
 

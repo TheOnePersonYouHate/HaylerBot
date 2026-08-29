@@ -23,10 +23,11 @@ import brain
 import config
 from brain import npc_respond
 from npcs import (
-    CREW, SHIP, authority_note, can_order_ship, can_reach, comms_channel,
-    find_addressed_split, find_called, find_hailed_spaces, is_group_address,
-    is_movement_order, npc_by_display_name, player_location_from_text,
-    rank_from_roles, rank_index, resolve_player, space_of,
+    CREW, SHIP, announcement_followup, authority_note, can_order_ship, can_reach,
+    comms_channel, find_addressed_split, find_called, find_hailed_spaces,
+    is_announcement_order, is_group_address, is_movement_order,
+    npc_by_display_name, player_location_from_text, rank_from_roles, rank_index,
+    resolve_player, space_of,
 )
 from plot import Plot, load_plots, save_plots
 from ship import ShipState, load_maps, load_states, load_texts, save_maps, save_states, save_texts
@@ -426,8 +427,11 @@ async def resolve_reply_target(message: discord.Message):
 async def deliver_followup(cs: ChannelState, channel, npc, text: str) -> None:
     await asyncio.sleep(FOLLOWUP_DELAY)
     if await speak(cs, channel, npc, text):
-        # The arrival beat is now the held action until someone releases it.
-        set_pending(cs, npc.key, text)
+        held = (cs.pending.get(npc.key) or "").lower()
+        if held.startswith("en route"):
+            set_pending(cs, npc.key, text)
+        else:
+            set_pending(cs, npc.key, "")
 
 
 def _apply_pending(cs: ChannelState, npc, reply: dict, player_text: str = "") -> None:
@@ -437,6 +441,8 @@ def _apply_pending(cs: ChannelState, npc, reply: dict, player_text: str = "") ->
         set_pending(cs, npc.key, pending)
         return
     if reply.get("followup"):
+        if is_announcement_order(player_text):
+            return
         dest = reply.get("location") or cs.location_of(npc)
         set_pending(cs, npc.key, f"en route to {dest}")
         return
@@ -448,9 +454,22 @@ async def _post_reply(cs: ChannelState, channel, npc, reply: dict,
                       speaker_rank: str = "", player_text: str = ""):
     """Post one NPC line, apply ship/location changes, schedule any follow-up. Returns
     the spoken line (for crew-to-crew scanning) or None if nothing could be posted."""
+    if not (reply.get("followup") or "").strip() and is_announcement_order(player_text):
+        canned = announcement_followup(player_text)
+        if canned:
+            reply["followup"] = canned
     if not await speak(cs, channel, npc, reply["say"]):
         return None  # couldn't post at all -> don't mutate ship state for an unseen reply
     apply_update(cs, reply.get("state_update") or {}, speaker_rank)
+    low = (player_text or "").lower()
+    if (
+        can_order_ship(speaker_rank)
+        and re.search(r"general quarters|battle stations|\bgq\b", low)
+        and "secure" not in low
+    ):
+        apply_update(cs, {"alert": "general quarters"}, speaker_rank)
+        cs.plot.add_fact("general quarters, condition Zebra")
+        save_plot(cs)
     proposed = (reply.get("location") or "").strip()
     if proposed and allows_location_change(cs, npc, proposed, player_text, reply):
         set_location(cs, npc.key, proposed)

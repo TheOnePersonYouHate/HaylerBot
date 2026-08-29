@@ -430,7 +430,7 @@ crew:
 # Map Discord accounts to the rank the crew should use. Identify someone by
 # discord_id and/or username. Leave "name" blank to be addressed by rank alone.
 # Keep real IDs in your local checkout only.
-players:
+players: []
   # - name: Santos
   #   rank: Captain
   #   role: Commanding Officer

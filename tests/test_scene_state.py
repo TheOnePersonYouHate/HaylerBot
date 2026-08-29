@@ -17,8 +17,9 @@ os.environ.setdefault("LLM_BASE_URL", "")
 os.environ.setdefault("XAI_API_KEY", "")
 
 from npcs import (  # noqa: E402
-    CREW, SHIP, can_order_ship, can_reach, find_all_addressed, find_called,
-    is_announcement_order, is_movement_order, kit_for, swo_for,
+    CREW, SHIP, announcement_followup, can_order_ship, can_reach,
+    find_all_addressed, find_called, is_announcement_order, is_movement_order,
+    kit_for, swo_for,
 )
 from ship import ShipState, load_maps, save_maps  # noqa: E402
 
@@ -211,6 +212,9 @@ def test_hartley_kit():
     silent = brain._kit_block(hartley, "Hartley, got a minute?")
     check("prompt kit on colors", "Attention to colors" in attached)
     check("prompt kit off on banter", silent == "")
+    canned = announcement_followup("Bosun, sound general quarters, set condition zebra")
+    check("GQ followup is the 1MC call", "General quarters, general quarters" in canned)
+    check("GQ followup is not a drill unless said", "not a drill" in canned.lower())
 
 
 def test_teleports():
