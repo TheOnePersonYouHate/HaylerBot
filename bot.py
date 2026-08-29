@@ -458,6 +458,8 @@ async def _post_reply(cs: ChannelState, channel, npc, reply: dict,
         canned = announcement_followup(player_text, cs.plot)
         if canned:
             reply["followup"] = canned
+    if reply.get("followup") and "general quarters" in reply["followup"].lower():
+        reply["followup"] = reply["followup"].replace('"', "")
     if not await speak(cs, channel, npc, reply["say"]):
         return None  # couldn't post at all -> don't mutate ship state for an unseen reply
     apply_update(cs, reply.get("state_update") or {}, speaker_rank)
