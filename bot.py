@@ -552,6 +552,10 @@ async def on_message(message: discord.Message):
         return
     if not message.content:
         return
+    # Prefix commands (!plot) -- slash commands can be locked to admins on HNC.
+    if message.content.startswith("!"):
+        await bot.process_commands(message)
+        return
     if is_ooc(message.content):
         log.info("%s %s: %r -> ignored (OOC)", _chan(message), message.author.display_name, message.content)
         return  # out-of-character / out-of-context aside -- the crew ignore it
@@ -654,19 +658,32 @@ async def status(interaction: discord.Interaction):
     await interaction.response.send_message(f"```\n{info}\n```", ephemeral=True)
 
 
-@bot.tree.command(name="plot", description="Show or clear the CIC plot (contacts and last facts)")
-@discord.app_commands.describe(action="Leave empty to show. Use clear to wipe contacts.")
-async def plot_cmd(interaction: discord.Interaction, action: str = None):
-    cs = channel_state(interaction.channel_id)
+def _apply_plot_action(cs: ChannelState, action: str | None) -> str:
     act = (action or "").strip().lower()
     if act in {"clear", "reset", "wipe"}:
         cs.plot.clear()
         cs.plot.facts = []
         save_plot(cs)
-        await interaction.response.send_message("Plot cleared.", ephemeral=True)
+        return "Plot cleared."
+    return f"```\n{cs.plot.display(cs.ship.alert)}\n```"
+
+
+@bot.tree.command(name="plot", description="Show or clear the CIC plot (contacts and last facts)")
+@discord.app_commands.describe(action="Leave empty to show. Use clear to wipe contacts.")
+@discord.app_commands.default_permissions(send_messages=True)
+async def plot_cmd(interaction: discord.Interaction, action: str = None):
+    await interaction.response.send_message(
+        _apply_plot_action(channel_state(interaction.channel_id), action),
+        ephemeral=True,
+    )
+
+
+@bot.command(name="plot")
+async def plot_prefix(ctx: commands.Context, action: str = None):
+    """Show or clear the CIC plot. Use when /plot is locked to admins: !plot / !plot clear"""
+    if ctx.channel.id not in config.RP_CHANNEL_IDS:
         return
-    body = cs.plot.display(cs.ship.alert)
-    await interaction.response.send_message(f"```\n{body}\n```", ephemeral=True)
+    await ctx.send(_apply_plot_action(channel_state(ctx.channel.id), action))
 
 
 @bot.tree.command(name="crew", description="List the NPC crew and how to address them")
