@@ -96,13 +96,31 @@ The first run bootstraps; every run after just starts:
 
 ## Using it
 
-- Address a crew member by name in the RP channel:
-  - `Helmsman, come to course 090 and make turns for 15 knots.`
-  - `Lookout, report.`
-  - `Bosun, sound general quarters.`
-  - `Navigator, what's the bearing to the nearest island?`
-- `/status` — show the current ship state (private to you).
-- `/crew` — list the crew and how to address each one.
+Full playbook: **[COMMANDS.md](COMMANDS.md)**.
+
+Address a crew member by name in the RP channel:
+
+- `McTane, come to course 090 and make turns for 15 knots.`
+- `Lieutenant Hoover, report.`
+- `Bosun, sound general quarters.`
+- `*In CIC*` then talk to whoever is there.
+- `*three friendly aircraft, bearing 045, IFF friendly*` then `/plot` or `!plot`.
+
+### Commands
+
+| Command | Where | What it does |
+|---|---|---|
+| `/plot` | Slash (you only) | Show the CIC plot |
+| `/plot action:clear` | Slash (you only) | Wipe the plot |
+| `!plot` | Prefix (channel) | Same as `/plot` — use when slash is locked |
+| `!plot clear` | Prefix (channel) | Same as `/plot action:clear` |
+| `/status` | Slash (you only) | Course, speed, alert, pending waits, plot |
+| `/crew` | Slash (you only) | NPC list, aliases, locations |
+| `/where` | Slash (you only) | Your space and who is in earshot |
+| `/roster` | Slash (you only) | Humans and the rank the crew use |
+| `/recap` | Slash (you only) | Write this session into the ship's log |
+
+On a host server, an admin may need to enable new slash commands under **Integrations → Hayler Bot**. `!plot` does not need that.
 
 ## The crew (defined in `characters.yaml`)
 
