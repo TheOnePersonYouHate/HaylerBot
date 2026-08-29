@@ -229,7 +229,6 @@ crew:
         (on completion) "Set the regular underway watch."
       GENERAL QUARTERS (pass this FULL call, do not shorten it, do not wrap it in quotes):
         General quarters, general quarters! All hands man your battle stations!
-        Reason for general quarters: [air / surface / submarine / unknown contacts].
         The route of travel is forward and up to starboard, down and aft to port.
         Set material condition Zebra throughout the ship.
         [If ASW:] Set the ASW detail.

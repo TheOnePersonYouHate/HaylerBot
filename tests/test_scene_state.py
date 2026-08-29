@@ -218,7 +218,7 @@ def test_hartley_kit():
     check("GQ followup is the 1MC call", "General quarters, general quarters" in canned)
     check("GQ includes route of travel", "forward and up to starboard" in canned)
     check("GQ includes material condition", "material condition Zebra" in canned)
-    check("GQ reason from drones is air", "Reason for general quarters: air" in canned)
+    check("GQ has no reason-for line", "Reason for general quarters" not in canned)
     check("GQ followup is not a drill unless said", "not a drill" in canned.lower())
 
 

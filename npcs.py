@@ -512,14 +512,12 @@ def _gq_reason(order: str, plot=None) -> str:
 
 
 def general_quarters_1mc(order: str = "", plot=None) -> str:
-    """Full GQ pass-the-word: reason, route of travel, Zebra, drill/not, alarm."""
+    """GQ 1MC: man stations, route of travel, Zebra, drill/not, alarm. No 'reason' line."""
     drill = "This is a drill." if "drill" in (order or "").lower() else "This is not a drill."
-    reason = _gq_reason(order, plot)
-    asw = " Set the ASW detail." if reason == "submarine" else ""
+    asw = " Set the ASW detail." if _gq_reason(order, plot) == "submarine" else ""
     return (
         "*pipes, then over the 1MC* General quarters, general quarters! "
         "All hands man your battle stations! "
-        f"Reason for general quarters: {reason}. "
         "The route of travel is forward and up to starboard, down and aft to port. "
         f"Set material condition Zebra throughout the ship.{asw} {drill} "
         "*general quarters alarm, twelve gongs*"
