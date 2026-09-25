@@ -9,12 +9,18 @@ If a new slash command is missing on a server, an admin must enable it: **Server
 | Command | Who sees it | What it does |
 |---|---|---|
 | `/plot` | You only | Show the CIC plot (contacts + last facts) |
-| `/plot action:clear` | You only | Wipe all contacts and facts |
+| `/plot action:clear` | You only | Wipe all contacts and facts. Needs Manage Messages or an officer rank |
+| `/pin list` | You only | Episodic pins for this channel. Needs Manage Messages or an officer rank |
+| `/pin add` | You only | Pin a short in-world fact (≤200 characters, ≤12). Needs Manage Messages or an officer rank |
+| `/pin remove` | You only | Remove one pin by number or by words. Same gate as add |
+| `/pin clear` | You only | Wipe pins. Same gate |
+| `/pin extract` | You only | Ask the model for a few in-world pins. Same gate, and a cooldown shared with `/recap` |
 | `/status` | You only | Course, speed, alert, pending waits, plot, last LLM backend |
 | `/crew` | You only | NPC roster, aliases, current location |
 | `/where` | You only | Your space and who is in earshot |
 | `/roster` | You only | Humans aboard and the rank the crew use for them |
-| `/recap` | You only | Summarize this session into the ship's log |
+| `/recap` | You only | Summarize this session into the ship's log (cooldown) |
+| `/recap action:clear` | You only | Wipe the ship's log. Needs Manage Messages or an officer rank |
 
 ## Prefix commands
 
@@ -24,6 +30,12 @@ Use these when slash commands are locked (no admin on the host server).
 |---|---|---|
 | `!plot` | Channel | Same as `/plot` |
 | `!plot clear` | Channel | Same as `/plot action:clear` |
+| `!pin` / `!pin list` | Channel | Same as `/pin list` |
+| `!pin add <fact>` | Channel | Same as `/pin add` |
+| `!pin remove <n or words>` | Channel | Same as `/pin remove` |
+| `!pin clear` | Channel | Same as `/pin clear` |
+| `!recap` | Channel | Same as `/recap` |
+| `!recap clear` | Channel | Same as `/recap action:clear` |
 
 `reset` and `wipe` also work in place of `clear`.
 
@@ -90,7 +102,7 @@ Face-to-face only works in the **same space**. Name someone in another compartme
 
 | Where | What to set |
 |---|---|
-| Integrations → Hayler Bot | Enable `/plot` `/status` `/crew` `/where` `/roster` `/recap` for @everyone or the CIC role |
+| Integrations → Hayler Bot | Enable `/plot` `/pin` `/status` `/crew` `/where` `/roster` `/recap` for @everyone or the CIC role |
 | Role permissions | **Use Application Commands** |
 | RP channel | View Channel, Send Messages, Read History, **Manage Webhooks**, Embed Links, Use Application Commands |
 

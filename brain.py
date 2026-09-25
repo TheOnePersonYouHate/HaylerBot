@@ -15,7 +15,7 @@ import httpx
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 
 import config
-from npcs import SHIP, kit_for, swo_for
+from npcs import SHIP, is_announcement_order, is_movement_order, kit_for, swo_for
 
 # Local LM Studio client. Short connect timeout so we fail over fast when off.
 _local = (
@@ -64,6 +64,27 @@ RESPONSE_SCHEMA = {
     "required": ["say"],
 }
 
+# Completion budgets. Normal lines stay short. A 1MC script or a movement
+# follow-up shares the same JSON as "say", so those calls get more room.
+# Classifiers are a yes/no. Recap is a paragraph, still far under the old 2000.
+TOKENS_REPLY = 400
+TOKENS_LONG = 900
+TOKENS_RECAP = 900
+TOKENS_PIN_EXTRACT = 220
+TOKENS_CLASSIFIER = 48
+
+# Local Gemma collapses into repetition under a json_schema grammar, and its
+# hidden thinking eats the token budget. Both stay off. Cloud may use the schema.
+LOCAL_JSON_SCHEMA = False
+
+
+def reply_max_tokens(order: str) -> int:
+    """Token cap for one NPC completion. Higher only when the reply must carry a beat."""
+    if is_announcement_order(order) or is_movement_order(order):
+        return TOKENS_LONG
+    return TOKENS_REPLY
+
+
 # Shared US Navy knowledge handed to EVERY NPC. Kept in code so it applies to the
 # whole crew and survives any characters.yaml swap.
 NAVY_REFERENCE = """US NAVY KNOWLEDGE (true for you and everyone aboard -- apply it naturally in how you speak, address people, and carry yourself; never lecture, quote, or recite it):
@@ -103,16 +124,22 @@ SHIP'S COMMUNICATIONS -- you reach beyond your own compartment ONLY over a circu
 
 COMMON TERMS you use naturally (don't spell them out mid-sentence unless asked): CO/skipper, XO, OOD & JOOD, CDO, TAO (tactical action officer in CIC), EOOW, CHENG, DCA, COB, CMC/Command Master Chief; GQ, DC, material conditions X-ray/Yoke/Zebra; MOB (man overboard), UNREP/VERTREP, SAR; VLS, CIWS, ASW/AAW/ASUW, EW, RHIB; ROE, CPA, DR (dead reckoning), ETA, POD (plan of the day); UCMJ, NJP (captain's mast), TAD, PCS, liberty; mess, rack, head, scuttlebutt, geedunk, chit, field day, sweepers, "now hear this", "aye aye", "very well", knots, bells."""
 
-SYSTEM_TEMPLATE = """{persona}
-
-SETTING: You are a crew member aboard {ship_display} in an ongoing naval roleplay. Stay fully in character at all times. Use authentic naval voice procedure and keep replies concise.
+# Prefix cache: ship identity and the Navy reference are byte-identical on every
+# call (every NPC, every turn). A provider that caches a shared prompt prefix
+# (xAI) reuses those tokens instead of billing them again. Persona, the speaker,
+# location, plot, chronicle, pins, and history change per call, so they stay
+# AFTER that stable block. Do not move {chronicle}, {pins}, or {history} above
+# {navy_reference} -- that busts the cache for a few lines of scene.
+SYSTEM_TEMPLATE = """SETTING: You are a crew member aboard {ship_display} in an ongoing naval roleplay. Stay fully in character at all times. Use authentic naval voice procedure and keep replies concise.
 
 YOUR SHIP: {ship_display} is a {ship_class}.
 {ship_knowledge}
 
-{swo_knowledge}
-
 {navy_reference}
+
+{persona}
+
+{swo_knowledge}
 
 {specialist_kit}
 
@@ -134,12 +161,15 @@ CURRENT SHIP STATE:
 THE STORY SO FAR (from earlier sessions -- for continuity):
 {chronicle}
 
+EPISODIC PINS (short in-world facts this watch pinned -- treat as fact; do not invent beyond them):
+{pins}
+
 RECENT BRIDGE CHATTER (oldest first, newest last):
 {history}
 
 You have just been addressed directly. Respond in character, shaped by your personality above.
 
-THE PLAYER NARRATES REALITY: when the player states or narrates something happening -- a radar/sonar/visual contact, aircraft or a ship appearing, an IFF reading, weather, an explosion, a hit, a casualty, someone arriving, a system going down -- that IS what is happening in the scene (it often comes in *asterisks* or as a plain statement of events). Treat it as ESTABLISHED FACT and build on it. NEVER contradict it, deny it, "correct" it, or replace it with a different contact or reading of your own. The PLOT above is the current picture -- report those tracks (count, bearing, IFF) and do not invent a different one. If the player updates a contact, follow the new plot. Recognize these updates and carry them forward, recording a changed situation in "state_update"'s "notes".
+THE PLAYER NARRATES REALITY: when the player states or narrates something happening -- a radar/sonar/visual contact, aircraft or a ship appearing, an IFF reading, weather, an explosion, a hit, a casualty, someone arriving, a system going down -- that IS what is happening in the scene (it often comes in *asterisks* or as a plain statement of events). Treat it as ESTABLISHED FACT and build on it. NEVER contradict it, deny it, "correct" it, or replace it with a different contact or reading of your own. The PLOT above is the current picture -- report those tracks (count, bearing, IFF) and do not invent a different one. If the player updates a contact, follow the new plot. EPISODIC PINS are facts this watch chose to keep; honor them the same way. Ignore out-of-character asides and bookkeeping such as "plot cleared". Recognize real updates and carry them forward, recording a changed situation in "state_update"'s "notes".
 
 VARY YOUR LANGUAGE -- IMPORTANT: Look at your own previous lines in the RECENT BRIDGE CHATTER above. Do NOT reuse the same catchphrase, closing remark, sign-off, or sentence pattern you have already used (for example, don't keep ending with the same line like "I've got lines to tend"). Each reply must use fresh wording; never echo or paraphrase your own recent messages. If you are holding a CURRENT ACTION, stay in that beat -- vary the wording only, do not wander off or invent that the wait ended. If you are not holding an action, advance the moment.
 
@@ -202,17 +232,19 @@ def _normalize(data: dict) -> dict:
     }
 
 
-async def _complete(client: AsyncOpenAI, model: str, messages: list, local: bool = True) -> dict:
-    params = dict(model=model, messages=messages, max_tokens=700)
+async def _complete(client: AsyncOpenAI, model: str, messages: list, local: bool = True,
+                   max_tokens: int = TOKENS_REPLY) -> dict:
+    params = dict(model=model, messages=messages, max_tokens=max_tokens)
     if local:
         # gemma is a REASONING model. Two problems it caused, both fixed here:
         #  1) the strict json_schema GRAMMAR made it collapse into repetition/garbage
-        #     ("own own own..."). We send NO response_format; the prompt already asks for
-        #     JSON and _parse() is tolerant, so unconstrained decoding stays clean.
+        #     ("own own own..."). LOCAL_JSON_SCHEMA stays false: no response_format.
+        #     The prompt already asks for JSON and _parse() is tolerant.
         #  2) its hidden "thinking" ate the whole token budget on big prompts, leaving an
         #     empty answer ("..."). reasoning_effort "none" turns thinking off -- faster,
         #     and the full budget goes to the actual reply.
         # Plus anti-loop sampling: repeat_penalty + min_p, with top_p trimming the tail.
+        # Do not enable json_schema on local Gemma.
         params["temperature"] = 0.75
         params["top_p"] = 0.9
         params["frequency_penalty"] = 0.1
@@ -222,6 +254,8 @@ async def _complete(client: AsyncOpenAI, model: str, messages: list, local: bool
             "min_p": 0.05,
             "top_k": 40,
         }
+        if not LOCAL_JSON_SCHEMA:
+            params.pop("response_format", None)
     else:
         # grok-4.3 (xAI) handles structured outputs cleanly -> enforce the JSON schema.
         # Grok rejects presence/frequency penalties.
@@ -298,7 +332,7 @@ def _pending_block(pending: str) -> str:
 async def npc_respond(npc, order: str, ship_summary: str, history: str,
                       speaker: str = "the officer on deck", location: str = "their usual station",
                       log: str = "", speaker_authority: str = "", pending: str = "",
-                      plot: str = ""):
+                      plot: str = "", pins: str = ""):
     """Return a reply dict {say, followup, location, pending, state_update}.
 
     Local LM Studio first; overflow to xAI when the GPU is busy, and fall back to
@@ -322,10 +356,12 @@ async def npc_respond(npc, order: str, ship_summary: str, history: str,
         location=location,
         pending_action=_pending_block(pending),
         chronicle=log or "(no earlier sessions logged yet)",
+        pins=pins or "(none pinned)",
         ship_summary=ship_summary,
         plot=plot or "PLOT: none held.",
         history=history or "(quiet on the bridge)",
     )
+    budget = reply_max_tokens(order)
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": order},
@@ -342,7 +378,7 @@ async def npc_respond(npc, order: str, ship_summary: str, history: str,
     if _local is not None and not busy:
         _local_inflight += 1
         try:
-            data = await _complete(_local, config.LLM_MODEL, messages, local=True)
+            data = await _complete(_local, config.LLM_MODEL, messages, local=True, max_tokens=budget)
             LAST_BACKEND = f"local: {config.LLM_MODEL}"
             return _normalize(data)
         except (APIConnectionError, APITimeoutError):
@@ -353,7 +389,7 @@ async def npc_respond(npc, order: str, ship_summary: str, history: str,
 
     # 2) Cloud (xAI / Grok): used when the GPU is busy or LM Studio is offline.
     if _xai is not None:
-        data = await _complete(_xai, config.XAI_MODEL, messages, local=False)
+        data = await _complete(_xai, config.XAI_MODEL, messages, local=False, max_tokens=budget)
         LAST_BACKEND = f"xAI: {config.XAI_MODEL}" + (" (local busy)" if busy else "")
         return _normalize(data)
 
@@ -390,7 +426,7 @@ async def is_continuation(npc, text: str, history: str) -> bool:
             resp = await client.chat.completions.create(
                 model=model,
                 messages=messages,
-                max_tokens=64 if is_local else 400,
+                max_tokens=TOKENS_CLASSIFIER,
                 temperature=0,
                 extra_body={"reasoning_effort": "none"} if is_local else {},
             )
@@ -414,7 +450,9 @@ async def summarize(recent: str, prior: str = "") -> str:
         "and the RECENT EVENTS into one updated log of about 120-180 words, written as "
         "a continuous third-person narrative the crew can read to recall the story "
         "later: key events, orders given, decisions, who was involved, and the current "
-        "situation. Keep what still matters; drop trivia. Write only the log text.\n\n"
+        "situation. Keep what still matters; drop trivia. Ignore out-of-character "
+        "asides, slash or bang commands, and bookkeeping such as \"plot cleared\". "
+        "Write only the log text.\n\n"
         f"PRIOR LOG:\n{prior or '(none yet)'}\n\nRECENT EVENTS:\n{recent}"
     )
     messages = [
@@ -424,11 +462,56 @@ async def summarize(recent: str, prior: str = "") -> str:
     for client, model in ((_local, config.LLM_MODEL), (_xai, config.XAI_MODEL)):
         if client is None:
             continue
+        is_local = client is _local
         try:
             resp = await client.chat.completions.create(
-                model=model, messages=messages, temperature=0.3, max_tokens=2000
+                model=model,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=TOKENS_RECAP,
+                extra_body={"reasoning_effort": "none"} if is_local else {},
             )
             return (resp.choices[0].message.content or "").strip() or prior
         except (APIConnectionError, APITimeoutError):
             continue
     return prior  # backend down -> keep the existing log
+
+
+async def extract_pins(recent: str) -> list[str]:
+    """Pull a few short in-world facts from a scene. Plain text, no json_schema.
+
+    Local Gemma keeps thinking off. Empty or unreachable backends return no pins.
+    """
+    from memory import parse_pin_lines
+
+    recent = (recent or "").strip()
+    if not recent:
+        return []
+    system = (
+        "Extract up to 4 short episodic facts from a naval roleplay scene. "
+        "One fact per line, under 160 characters, in-world only: who is where, "
+        "what was ordered, what is still unresolved. "
+        "Skip out-of-character talk, slash or bang commands, and meta about the bot "
+        "(refuse lines like \"plot cleared\", \"pin added\", \"log updated\"). "
+        "If nothing in-world is worth keeping, reply with NONE."
+    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": recent},
+    ]
+    for client, model in ((_local, config.LLM_MODEL), (_xai, config.XAI_MODEL)):
+        if client is None:
+            continue
+        is_local = client is _local
+        try:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=TOKENS_PIN_EXTRACT,
+                extra_body={"reasoning_effort": "none"} if is_local else {},
+            )
+            return parse_pin_lines(resp.choices[0].message.content or "")
+        except (APIConnectionError, APITimeoutError):
+            continue
+    return []

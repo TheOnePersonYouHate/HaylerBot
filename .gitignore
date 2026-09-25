@@ -11,6 +11,9 @@ chronicle.json
 pending.json
 locations.json
 plot.json
+player_locations.json
+pins.json
+scene.json
 deploy/oracle-cloud-init.sh
 bot.log*
 *.corrupt

@@ -22,6 +22,10 @@ from discord.ext import commands
 import brain
 import config
 from brain import npc_respond
+from memory import (
+    Pinboard, history_for_recap, is_noisy_residue, load_pinboards, save_pinboards,
+    scene_blob, scene_lines,
+)
 from npcs import (
     CREW, SHIP, announcement_followup, authority_note, can_order_ship, can_reach,
     comms_channel, find_addressed_split, find_called, find_hailed_spaces,
@@ -105,7 +109,10 @@ _ship_states = load_states(config.STATE_FILE)  # {channel_id: ShipState}
 _logs = load_texts(config.LOG_FILE)            # {channel_id: persistent ship's-log summary}
 _pending = load_maps(config.PENDING_FILE)      # {channel_id: {npc.key: pending action}}
 _locations = load_maps(config.LOCATIONS_FILE)  # {channel_id: {npc.key: current location}}
+_player_locations = load_maps(config.PLAYER_LOCATIONS_FILE)  # {channel_id: {author_id: space}}
 _plots = load_plots(config.PLOT_FILE)          # {channel_id: Plot}
+_pins = load_pinboards(config.PINS_FILE)       # {channel_id: Pinboard}
+_scenes = load_texts(config.SCENE_FILE)        # {channel_id: last-scene blob}
 
 
 class CrewBot(commands.Bot):
@@ -136,9 +143,11 @@ class ChannelState:
     active: dict = field(default_factory=dict)  # author_id -> (npc, expires_at): each speaker's own thread
     pending: dict = field(default_factory=dict)  # npc.key -> unresolved action (knocking, waiting, en route)
     plot: Plot = field(default_factory=Plot)     # contacts + last facts (battle memory)
+    pins: Pinboard = field(default_factory=Pinboard)  # capped episodic facts
     summary: str = ""        # persistent ship's log carried over from earlier sessions
     last_activity: float = 0.0
     log_dirty: bool = False
+    last_memory_llm: float = 0.0  # monotonic; user /recap and /pin extract share a cooldown
 
     def location_of(self, npc) -> str:
         return self.locations.get(npc.key) or npc.station or "their usual station"
@@ -185,9 +194,23 @@ def channel_state(channel_id: int) -> ChannelState:
         cs.summary = _logs.get(channel_id, "")
         cs.pending = dict(_pending.get(channel_id) or {})
         cs.locations = dict(_locations.get(channel_id) or {})
+        cs.player_space = _player_space_from(_player_locations.get(channel_id) or {})
         cs.plot = _plots.get(channel_id) or Plot()
+        board = _pins.get(channel_id)
+        cs.pins = Pinboard(items=list(board.items) if board else [])
+        for line in scene_lines(_scenes.get(channel_id, "")):
+            cs.history.append(line)
         _channels[channel_id] = cs
     return cs
+
+
+def _player_space_from(raw: dict) -> dict:
+    """Disk map is {str(author_id): space}. Runtime lookups use the int id."""
+    out = {}
+    for key, space in (raw or {}).items():
+        if str(key).lstrip("-").isdigit() and str(space).strip():
+            out[int(key)] = str(space)
+    return out
 
 
 def save_plot(cs: ChannelState) -> None:
@@ -234,6 +257,77 @@ def allows_location_change(cs: ChannelState, npc, proposed: str, player_text: st
     if reply and reply.get("followup"):
         return True
     return is_movement_order(player_text)
+
+
+def set_player_space(cs: ChannelState, author_id: int, space: str) -> None:
+    """Remember where this player is, with the same durability as NPC locations."""
+    space = (space or "").strip()
+    if not space or cs.player_space.get(author_id) == space:
+        return
+    cs.player_space[author_id] = space
+    data = {str(k): v for k, v in cs.player_space.items() if str(v).strip()}
+    _save_channel_map(_player_locations, cs, data, config.PLAYER_LOCATIONS_FILE)
+
+
+def save_scene_seed(cs: ChannelState) -> None:
+    """Persist the tail of this channel's RAM history for the next process."""
+    blob = scene_blob(cs.history)
+    if blob:
+        _scenes[cs.channel_id] = blob
+    else:
+        _scenes.pop(cs.channel_id, None)
+    save_texts(_scenes, config.SCENE_FILE)
+
+
+def save_pins(cs: ChannelState) -> None:
+    if cs.pins.items:
+        _pins[cs.channel_id] = cs.pins
+    else:
+        _pins.pop(cs.channel_id, None)
+    save_pinboards(_pins, config.PINS_FILE)
+
+
+def clear_chronicle(cs: ChannelState) -> None:
+    """Wipe the ship's log for this channel. Does not touch pins or the scene seed."""
+    cs.summary = ""
+    cs.log_dirty = False
+    _logs.pop(cs.channel_id, None)
+    save_texts(_logs, config.LOG_FILE)
+
+
+def can_manage_memory(member) -> bool:
+    """Plot/pin/chronicle clears and pin edits: Manage Messages, or an officer rank.
+
+    Stricter than Send Messages. Checked at runtime so an officer whose Discord
+    role is not Manage Messages can still use the command (default_permissions
+    would hide it from them).
+    """
+    perms = getattr(member, "guild_permissions", None)
+    if perms is not None and getattr(perms, "manage_messages", False):
+        return True
+    return can_order_ship(_speaker_rank(member))
+
+
+def memory_llm_wait(cs: ChannelState) -> int:
+    """Seconds until another user-triggered recap or pin-extract is allowed. 0 = ready."""
+    elapsed = time.monotonic() - (cs.last_memory_llm or 0.0)
+    remain = config.MEMORY_LLM_COOLDOWN - elapsed
+    if remain <= 0:
+        return 0
+    return int(remain) + 1
+
+
+def mark_memory_llm(cs: ChannelState) -> None:
+    cs.last_memory_llm = time.monotonic()
+
+
+def take_memory_llm_slot(cs: ChannelState) -> int:
+    """Reserve the shared recap/pin-extract cooldown. Returns seconds still left, or 0."""
+    wait = memory_llm_wait(cs)
+    if wait:
+        return wait
+    mark_memory_llm(cs)
+    return 0
 
 
 def set_location(cs: ChannelState, npc_key: str, value: str) -> None:
@@ -395,11 +489,22 @@ async def route(cs: ChannelState, author_id: int, text: str, now: float, reply_n
         if here is None and called:
             here = space_of(cs.location_of(reply_npc or called[0]))  # bootstrap: first contact only
         if here is not None:
-            cs.player_space[author_id] = here                 # remember where you are (don't teleport on a call)
+            set_player_space(cs, author_id, here)  # same durability as NPC locations
+        # A named vocative or a Discord reply (already folded into `called`) gets
+        # the completion. Do not also wake every co-located body. A pure group
+        # hail ("team", "all hands", nobody named) is one chorus line from the
+        # senior watchstander in the space. MAX_CREW_CHAIN still caps NPC->NPC.
+        pure_group = bool(group) and not called and not station_npcs
+        chorus_key = None
+        if pure_group and here is not None:
+            senior = _senior_in_space(cs, here)
+            if senior is not None:
+                chorus_key = senior.key
         # EARSHOT vs CIRCUITS: someone you CALL by name answers only if they're in your
         # space -- UNLESS you're on a ship's circuit (1MC / radio / intercom / sound-
-        # powered), which carries the hail across the ship. Someone you only MENTION, or
-        # a group hail, needs co-location. A STATION hailed by callsign is a circuit call.
+        # powered), which carries the hail across the ship. Someone you only MENTION
+        # needs co-location, and only when nobody was actually hailed. A STATION
+        # hailed by callsign is a circuit call.
         called_keys = {n.key for n in called}
         mentioned_keys = {n.key for n in mentioned}
         seen, npcs = set(), []
@@ -409,8 +514,8 @@ async def route(cs: ChannelState, author_id: int, text: str, now: float, reply_n
             co_located = here is not None and space_of(cs.location_of(n)) == here
             if (n.key in station_keys
                     or (n.key in called_keys and (co_located or comms))
-                    or (group and co_located)
-                    or (n.key in mentioned_keys and co_located)):
+                    or n.key == chorus_key
+                    or (n.key in mentioned_keys and co_located and not called_keys)):
                 npcs.append(n)
                 seen.add(n.key)
         if not npcs:
@@ -430,7 +535,7 @@ async def route(cs: ChannelState, author_id: int, text: str, now: float, reply_n
             return []  # a pure scene/story beat -- the crew note it, but it's no one's cue to reply
         if cs.pending.get(live.key) or await brain.is_continuation(live, text, "\n".join(cs.history)):
             npcs = [live]
-            cs.player_space[author_id] = space_of(cs.location_of(live))
+            set_player_space(cs, author_id, space_of(cs.location_of(live)))
         else:
             return []
     else:
@@ -555,6 +660,7 @@ async def _run_crew_chain(cs: ChannelState, channel, calls, spoken: set, ship_su
                     log=cs.summary, speaker_authority=authority_note(caller.rank),
                     pending=cs.pending.get(called_npc.key, ""),
                     plot=cs.plot.render(cs.ship.alert),
+                    pins=cs.pins.render(),
                 )
         except Exception:
             log.exception("crew-chain reply failed for %s", called_npc.display_name)
@@ -628,8 +734,11 @@ async def on_message(message: discord.Message):
     speaker_authority = authority_for(message.author)
     cs.seen_players[message.author.id] = (message.author.display_name, speaker)
     label = speaker if speaker != "the officer on deck" else message.author.display_name
-    cs.history.append(f"{label}: {message.content}")
-    mark_activity(cs)
+    # OOC and !commands never reach here. Still drop meta ("plot cleared") so it
+    # does not become a fact the crew repeat, and so it does not reset the idle recap.
+    if not is_noisy_residue(message.content):
+        cs.history.append(f"{label}: {message.content}")
+        mark_activity(cs)
 
     if is_signoff(message.content):
         cs.active.pop(message.author.id, None)  # "out"/hang-up ends the exchange
@@ -638,7 +747,7 @@ async def on_message(message: discord.Message):
 
     loc = player_location_from_text(message.content)  # "*heads to engineering*" -> track your position
     if loc:
-        cs.player_space[message.author.id] = loc
+        set_player_space(cs, message.author.id, loc)
 
     if cs.plot.ingest(message.content, source="player"):
         save_plot(cs)
@@ -673,6 +782,7 @@ async def on_message(message: discord.Message):
                             speaker, cs.location_of(npc), cs.summary,
                             speaker_authority=speaker_authority,
                             plot=cs.plot.render(cs.ship.alert),
+                            pins=cs.pins.render(),
                             pending=cs.pending.get(npc.key, ""))
                 for npc in npcs
             ),
@@ -721,9 +831,14 @@ async def status(interaction: discord.Interaction):
     await interaction.response.send_message(f"```\n{info}\n```", ephemeral=True)
 
 
-def _apply_plot_action(cs: ChannelState, action: str | None) -> str:
+_MEMORY_DENIED = "That needs Manage Messages or an officer rank."
+
+
+def _apply_plot_action(cs: ChannelState, action: str | None, member=None) -> str:
     act = (action or "").strip().lower()
     if act in {"clear", "reset", "wipe"}:
+        if member is None or not can_manage_memory(member):
+            return _MEMORY_DENIED
         cs.plot.clear()
         cs.plot.facts = []
         save_plot(cs)
@@ -736,7 +851,7 @@ def _apply_plot_action(cs: ChannelState, action: str | None) -> str:
 @discord.app_commands.default_permissions(send_messages=True)
 async def plot_cmd(interaction: discord.Interaction, action: str = None):
     await interaction.response.send_message(
-        _apply_plot_action(channel_state(interaction.channel_id), action),
+        _apply_plot_action(channel_state(interaction.channel_id), action, interaction.user),
         ephemeral=True,
     )
 
@@ -746,7 +861,137 @@ async def plot_prefix(ctx: commands.Context, action: str = None):
     """Show or clear the CIC plot. Use when /plot is locked to admins: !plot / !plot clear"""
     if ctx.channel.id not in config.RP_CHANNEL_IDS:
         return
-    await ctx.send(_apply_plot_action(channel_state(ctx.channel.id), action))
+    await ctx.send(_apply_plot_action(channel_state(ctx.channel.id), action, ctx.author))
+
+
+def _pin_mutate(cs: ChannelState, member, action: str, text: str) -> str | None:
+    """Apply a pin command, or return None when the caller must run pin-extract.
+
+    Every /pin subcommand is stricter than Send Messages: Manage Messages or
+    an officer rank. Listing is included so the command is not a back door.
+    """
+    act = (action or "list").strip().lower()
+    if not can_manage_memory(member):
+        return _MEMORY_DENIED
+    if act == "list":
+        return cs.pins.display()
+    if act == "add":
+        ok, msg = cs.pins.add(text)
+        if not ok:
+            return msg
+        save_pins(cs)
+        return f"Pinned ({len(cs.pins.items)}/12): {msg}"
+    if act in {"remove", "rm", "delete", "del"}:
+        ok, msg = cs.pins.remove(text)
+        if not ok:
+            return msg
+        save_pins(cs)
+        return f"Removed pin: {msg}"
+    if act in {"clear", "reset", "wipe"}:
+        cs.pins.clear()
+        save_pins(cs)
+        return "Pins cleared."
+    if act == "extract":
+        return None
+    return "Use add, list, remove, clear, or extract. Example: /pin add Bosun is waiting at the cabin."
+
+
+def _pin_extract_ready(cs: ChannelState, member) -> str | None:
+    """Permission, hygiene, and cooldown. None means the slot is taken and the LLM may run."""
+    denied = _pin_mutate(cs, member, "extract", "")
+    if denied is not None:
+        return denied
+    if not history_for_recap(cs.history):
+        return "Nothing in-world in this scene to pin."
+    wait = take_memory_llm_slot(cs)
+    if wait:
+        return f"Pin extract is cooling down. Try again in {wait}s."
+    return None
+
+
+async def _pin_extract(cs: ChannelState) -> str:
+    """Caller already took the memory-LLM slot."""
+    recent = history_for_recap(cs.history)
+    lines = await brain.extract_pins(recent)
+    added = []
+    for line in lines:
+        ok, msg = cs.pins.add(line)
+        if ok:
+            added.append(msg)
+    if added:
+        save_pins(cs)
+        return "Pinned:\n" + "\n".join(f"- {p}" for p in added)
+    return "No in-world facts worth pinning."
+
+
+pin_group = discord.app_commands.Group(
+    name="pin",
+    description="Episodic pins for this channel (officer or Manage Messages to edit)",
+)
+
+
+@pin_group.command(name="add", description="Pin a short in-world fact (200 characters, 12 per channel)")
+@discord.app_commands.describe(text="The fact to remember")
+async def pin_add(interaction: discord.Interaction, text: str):
+    cs = channel_state(interaction.channel_id)
+    await interaction.response.send_message(
+        _pin_mutate(cs, interaction.user, "add", text), ephemeral=True,
+    )
+
+
+@pin_group.command(name="list", description="List episodic pins for this channel")
+async def pin_list(interaction: discord.Interaction):
+    cs = channel_state(interaction.channel_id)
+    await interaction.response.send_message(
+        _pin_mutate(cs, interaction.user, "list", ""), ephemeral=True,
+    )
+
+
+@pin_group.command(name="remove", description="Remove one pin by number or by words from the text")
+@discord.app_commands.describe(which="Pin number from /pin list, or a few words from it")
+async def pin_remove(interaction: discord.Interaction, which: str):
+    cs = channel_state(interaction.channel_id)
+    await interaction.response.send_message(
+        _pin_mutate(cs, interaction.user, "remove", which), ephemeral=True,
+    )
+
+
+@pin_group.command(name="clear", description="Wipe every episodic pin on this channel")
+async def pin_clear(interaction: discord.Interaction):
+    cs = channel_state(interaction.channel_id)
+    await interaction.response.send_message(
+        _pin_mutate(cs, interaction.user, "clear", ""), ephemeral=True,
+    )
+
+
+@pin_group.command(name="extract", description="Ask the model for a few in-world pins from this scene")
+async def pin_extract_cmd(interaction: discord.Interaction):
+    cs = channel_state(interaction.channel_id)
+    ready = _pin_extract_ready(cs, interaction.user)
+    if ready is not None:
+        await interaction.response.send_message(ready, ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send(await _pin_extract(cs), ephemeral=True)
+
+
+bot.tree.add_command(pin_group)
+
+
+@bot.command(name="pin")
+async def pin_prefix(ctx: commands.Context, action: str = "list", *, text: str = ""):
+    """Episodic pins. !pin list / !pin add <fact> / !pin remove <n> / !pin clear"""
+    if ctx.channel.id not in config.RP_CHANNEL_IDS:
+        return
+    cs = channel_state(ctx.channel.id)
+    if (action or "list").strip().lower() == "extract":
+        ready = _pin_extract_ready(cs, ctx.author)
+        if ready is not None:
+            await ctx.send(ready)
+            return
+        await ctx.send(await _pin_extract(cs))
+        return
+    await ctx.send(_pin_mutate(cs, ctx.author, action, text))
 
 
 @bot.tree.command(name="crew", description="List the NPC crew and how to address them")
@@ -803,14 +1048,50 @@ async def roster(interaction: discord.Interaction):
 
 
 async def recap_channel(cs: ChannelState) -> bool:
-    """Write this channel's chronicle if there is something new. Returns True if saved."""
+    """Write this channel's chronicle if there is something new. Returns True if saved.
+
+    The scene seed is written first, including on idle and shutdown, so a failed
+    LLM call still leaves the last lines for the next process. OOC, commands,
+    and meta such as "plot cleared" are left out of the summary.
+    """
     if not cs.history or not cs.log_dirty:
         return False
-    cs.summary = await brain.summarize("\n".join(cs.history), cs.summary)
-    _logs[cs.channel_id] = cs.summary
-    save_texts(_logs, config.LOG_FILE)
+    save_scene_seed(cs)
+    recent = history_for_recap(cs.history)
+    if recent.strip():
+        # Idle, shutdown, and /recap share this clock so a second LLM recap
+        # cannot start the moment the first one finishes.
+        mark_memory_llm(cs)
+        cs.summary = await brain.summarize(recent, cs.summary)
+        _logs[cs.channel_id] = cs.summary
+        save_texts(_logs, config.LOG_FILE)
     cs.log_dirty = False
     return True
+
+
+def recap_gate(cs: ChannelState, member, action: str | None) -> str | None:
+    """Immediate reply for /recap, or None when the caller should run the LLM."""
+    act = (action or "").strip().lower()
+    if act in {"clear", "reset", "wipe"}:
+        if not can_manage_memory(member):
+            return _MEMORY_DENIED
+        clear_chronicle(cs)
+        return "Ship's log cleared."
+    if act:
+        return "Leave the action empty to write the log, or use clear to wipe it."
+    if not cs.history:
+        return "Nothing has happened to log yet."
+    wait = take_memory_llm_slot(cs)
+    if wait:
+        return f"Recap is cooling down. Try again in {wait}s."
+    return None
+
+
+async def run_recap(cs: ChannelState) -> str:
+    """User-triggered chronicle update. The cooldown slot was taken in recap_gate."""
+    cs.log_dirty = True
+    await recap_channel(cs)
+    return f"**Ship's log updated:**\n{cs.summary or '(empty)'}"
 
 
 async def recap_dirty_idle() -> None:
@@ -846,16 +1127,29 @@ async def _idle_recap_loop() -> None:
         await recap_dirty_idle()
 
 
-@bot.tree.command(name="recap", description="Summarize this session into the ship's log for next time")
-async def recap(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+@bot.tree.command(name="recap", description="Summarize this session into the ship's log, or clear it")
+@discord.app_commands.describe(action="Leave empty to write the log. Use clear to wipe it.")
+async def recap(interaction: discord.Interaction, action: str = None):
     cs = channel_state(interaction.channel_id)
-    if not cs.history:
-        await interaction.followup.send("Nothing has happened to log yet.", ephemeral=True)
+    quick = recap_gate(cs, interaction.user, action)
+    if quick is not None:
+        await interaction.response.send_message(quick, ephemeral=True)
         return
-    cs.log_dirty = True
-    await recap_channel(cs)
-    await interaction.followup.send(f"**Ship's log updated:**\n{cs.summary}", ephemeral=True)
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send(await run_recap(cs), ephemeral=True)
+
+
+@bot.command(name="recap")
+async def recap_prefix(ctx: commands.Context, action: str = None):
+    """Write or clear the ship's log. !recap / !recap clear"""
+    if ctx.channel.id not in config.RP_CHANNEL_IDS:
+        return
+    cs = channel_state(ctx.channel.id)
+    quick = recap_gate(cs, ctx.author, action)
+    if quick is not None:
+        await ctx.send(quick)
+        return
+    await ctx.send(await run_recap(cs))
 
 
 BOT_LOG_FILE = str(config.BASE_DIR / "bot.log")
@@ -912,6 +1206,9 @@ def _start_local_model() -> None:
         if already:
             log.info("Local model already loaded: %s", model)
             return
+        # Parallel 2-3 is snappier for one-line replies (less batching delay than 4).
+        # 4 matches LM Studio's default and LOCAL_MAX_INFLIGHT. Thinking stays off
+        # in brain.py (reasoning_effort "none"). Do not pass json_schema to local Gemma.
         subprocess.run(
             [lms, "load", model, "--gpu", "max", "--parallel", "4",
              "-c", str(LOCAL_CONTEXT), "-y"],

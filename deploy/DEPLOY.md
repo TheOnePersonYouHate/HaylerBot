@@ -122,5 +122,5 @@ The image never bakes in `.env` (it's excluded) — secrets come in at runtime v
   process crashes and reboots. The OpenAI client retries transient xAI errors.
 - **Secrets:** keep `.env` at mode `600`, run as a non-root user, and rotate the
   Discord token in the Developer Portal if it's ever exposed.
-- **One bot only:** run the bot in exactly one place at a time. Two instances on
-  the same token = doubled replies.
+- **xAI cost:** memory on this host is the plot, pins, chronicle, locations, and a short scene seed — small structured state on every call, not the channel scrollback. Ship identity and the Navy reference sit at the front of the prompt so xAI can reuse that prefix. That is what keeps the bill down. Do not stuff more transcript into the prompt to “help” it remember.
+- **One token, one process:** one Discord bot token is one running process. A second copy (home PC plus this VPS, or two containers) doubles every reply.

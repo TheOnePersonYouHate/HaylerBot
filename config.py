@@ -94,3 +94,10 @@ LOG_FILE = _under_base(os.getenv("LOG_FILE", "chronicle.json"))
 PENDING_FILE = _under_base(os.getenv("PENDING_FILE", "pending.json"))
 LOCATIONS_FILE = _under_base(os.getenv("LOCATIONS_FILE", "locations.json"))
 PLOT_FILE = _under_base(os.getenv("PLOT_FILE", "plot.json"))
+PLAYER_LOCATIONS_FILE = _under_base(os.getenv("PLAYER_LOCATIONS_FILE", "player_locations.json"))
+PINS_FILE = _under_base(os.getenv("PINS_FILE", "pins.json"))
+SCENE_FILE = _under_base(os.getenv("SCENE_FILE", "scene.json"))
+
+# Minimum seconds between user-triggered LLM memory calls (/recap and /pin extract).
+# Idle and shutdown recap are not gated; they are how the scene seed gets written.
+MEMORY_LLM_COOLDOWN = int(os.getenv("MEMORY_LLM_COOLDOWN", "120"))
