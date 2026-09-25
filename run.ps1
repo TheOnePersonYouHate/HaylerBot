@@ -55,6 +55,10 @@ try {
         Write-Host "      '$model' already loaded." -ForegroundColor DarkGray
     } else {
         Write-Host "      Loading '$model'..." -ForegroundColor Cyan
+        # Parallel 2-3 is snappier for one-line replies (less batching delay).
+        # 4 matches LM Studio's default and LOCAL_MAX_INFLIGHT in .env.
+        # The bot keeps local thinking off (reasoning_effort=none) and does NOT
+        # send json_schema to local Gemma -- that grammar makes it loop.
         lms load $model --gpu max --parallel 4 -c 24000 -y
     }
 } catch {

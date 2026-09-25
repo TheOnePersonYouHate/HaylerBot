@@ -317,7 +317,14 @@ def test_prompt_shape():
         ship_summary="ok",
         plot="PLOT: none",
         history='Hartley: "set {condition} Zebra"',
+        pins="pinned fact",
     )
+    check("stable navy block precedes persona",
+          filled.find("navy") < filled.find("You are Hartley."))
+    check("chronicle precedes pins",
+          filled.find("story (so far)") < filled.find("pinned fact"))
+    check("pins precede history",
+          filled.find("pinned fact") < filled.find("set (condition) Zebra"))
     check("braces in history do not KeyError", "set (condition) Zebra" in filled)
     check("speaker braces sanitized", "Captain (Santos)" in filled)
 

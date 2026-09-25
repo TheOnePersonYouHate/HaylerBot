@@ -54,7 +54,8 @@ Full command list: **[COMMANDS.md](COMMANDS.md)**.
 | Command | What it does |
 |---|---|
 | `/plot` or `!plot` | Show the CIC plot |
-| `/plot action:clear` or `!plot clear` | Wipe the plot |
+| `/plot action:clear` or `!plot clear` | Wipe the plot (Manage Messages or an officer) |
+| `/pin add` / `list` / `remove` | Short facts the watch keeps (edits need the same gate) |
 | `/status` | Ship, pending waits, plot |
 | `/crew` | NPCs and how to address them |
 | `/where` | Your space and who is in earshot |
@@ -93,6 +94,6 @@ Human players are listed under `players:` (Discord user ID and/or username → r
 - **Code owns the ship.** The model proposes; helm and GQ are refused unless the speaker is warrant+.
 - **Earshot is real.** A shout in CIC does not reach the main deck. 1MC / 21MC / a station hail does.
 - **Narration is fact.** `*three friendly aircraft, bearing 045*` is what is happening. The plot stores it.
-- **Scrollback is not memory.** History is a short window for voice. Plot, pending actions, locations, and the ship's log are what survive.
+- **Scrollback is not memory.** History is a short window for voice. Plot, pins, pending actions, locations, and the ship's log are what survive. A short scene seed is restored on boot so the watch does not open on silence.
 
 Deeper internals: **[ARCHITECTURE.md](ARCHITECTURE.md)**.

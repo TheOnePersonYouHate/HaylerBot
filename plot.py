@@ -10,6 +10,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 
+from memory import is_noisy_residue
 from ship import _atomic_write, _load_json
 
 MAX_CONTACTS = 8
@@ -104,7 +105,10 @@ class Plot:
                 note=str(raw.get("note") or ""),
                 source=str(raw.get("source") or "player"),
             ))
-        facts = [str(f) for f in (data.get("facts") or []) if str(f).strip()]
+        facts = [
+            str(f) for f in (data.get("facts") or [])
+            if str(f).strip() and not is_noisy_residue(str(f))
+        ]
         return cls(contacts=contacts[:MAX_CONTACTS], facts=facts[:MAX_FACTS])
 
     def render(self, alert: str = "") -> str:
@@ -145,8 +149,10 @@ class Plot:
         return len(self.contacts) != before or kind is None
 
     def add_fact(self, text: str) -> None:
+        if is_noisy_residue(text):
+            return
         text = _clip(text, 80)
-        if not text:
+        if not text or is_noisy_residue(text):
             return
         self.facts = [f for f in self.facts if f.lower() != text.lower()]
         self.facts.append(text)
@@ -159,11 +165,13 @@ class Plot:
             return False
         changed = False
         if _CLEAR_ALL.search(text):
+            # Drop the tracks. "plot cleared" is bookkeeping; storing it makes
+            # the model repeat the phrase as if it were the scene.
+            self.facts = [f for f in self.facts if not is_noisy_residue(f)]
             if self.contacts:
                 self.contacts = []
                 changed = True
-            self.add_fact("plot cleared")
-            return True
+            return changed
         if _CLEAR_AIR.search(text):
             if self.clear("air"):
                 changed = True

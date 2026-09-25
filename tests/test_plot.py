@@ -52,6 +52,13 @@ def test_ingest_and_merge():
     check("air cleared, surface remains", all(c.kind != "air" for c in p.contacts) and any(c.kind == "surface" for c in p.contacts))
     p.ingest("no contacts", "player")
     check("all cleared", p.contacts == [])
+    check("clear does not store plot-cleared meta",
+          all("plot cleared" not in f.lower() for f in p.facts))
+    check("air picture fact is tactical, not meta",
+          any("air picture" in f.lower() for f in p.facts))
+    p.add_fact("plot cleared")
+    check("add_fact refuses plot cleared",
+          all("plot cleared" not in f.lower() for f in p.facts))
 
 
 def test_seaman_cannot_via_apply():
@@ -108,6 +115,7 @@ def test_prompt_has_plot_slot():
         ship_summary="ok",
         plot='PLOT:\n  A1  air  friendly  brg 045',
         history="quiet",
+        pins="(none pinned)",
     )
     check("plot in system prompt", "A1  air  friendly" in filled)
 
